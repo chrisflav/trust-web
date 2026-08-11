@@ -1,0 +1,41 @@
+# The frontend's own build and tests, plus the one check that is not about the
+# frontend at all: whether its idea of the canonical bytes still matches Lean's.
+#
+# `conformance/` is fetched from chrisflav/trust rather than vendored here.  A
+# vendored copy is a copy that drifts, and what these vectors are for is
+# noticing drift.  `main` rather than a pin, deliberately: this is the pair that
+# has to agree *now*, and a pinned copy would go on passing after the two had
+# diverged.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Fetch the conformance vectors
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --filter=blob:none --sparse \
+            https://github.com/chrisflav/trust trust-core
+          cd trust-core
+          git sparse-checkout set conformance
+          cd ..
+          cp -r trust-core/conformance ./conformance
+          rm -rf trust-core
+          ls -l conformance
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
