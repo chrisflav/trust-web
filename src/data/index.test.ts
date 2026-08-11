@@ -8,7 +8,7 @@ import { StaticIndexSource, closure } from './source'
  * the frontend expects.
  *
  * Generate the index first:
- *   trust export --repo core --out web/public/index Init
+ *   trust export --repo core --out public/index Init
  */
 const base = new URL('../../public/index/core/', import.meta.url).pathname
 const available = existsSync(`${base}stmt-edges.bin`)

@@ -1,0 +1,13 @@
+# Keep the build context small and free of things an image must never carry.
+# `docker/Dockerfile.web` builds from this repository's root and copies all of
+# it, so without this every build would ship the exported indexes — hundreds of
+# megabytes of generated data — to the daemon before doing anything.
+
+.git
+node_modules
+**/node_modules
+
+# Generated indexes: bind-mounted at run time, never baked in.
+public/index
+dist
+*.tsbuildinfo

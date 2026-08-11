@@ -6,9 +6,10 @@ import type { Characterization, Marks, ProtectedMark, TrustMark } from './types'
  * Two sources, because they answer different questions.  The index's
  * `marks.json` is written by `trust export` and is the only thing that knows
  * whether a protected declaration still matches its snapshot — deciding that
- * needs the Lean environment.  The dev server's `/api/marks` reads
- * `trust-marks.json` directly, so edits show up without re-exporting an index
- * that takes twenty-five minutes to build at Mathlib scale.
+ * needs the Lean environment.  `/api/marks`, which `trust serve-marks` answers
+ * and the dev server proxies to, reads `trust-marks.json` directly, so edits
+ * show up without re-exporting an index that takes twenty-five minutes to build
+ * at Mathlib scale.
  *
  * When both are present the live file decides *which* declarations are marked
  * and the exported one supplies the protection verdicts.  A declaration

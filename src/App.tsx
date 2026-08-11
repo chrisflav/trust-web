@@ -30,7 +30,7 @@ const params = new URLSearchParams(window.location.search)
  * Which exported index to read.
  *
  * `trust export --repo <name>` writes one directory per repository, so several
- * can sit side by side under `web/public/index` and `?repo=` chooses between
+ * can sit side by side under `public/index` and `?repo=` chooses between
  * them — `?repo=core` for the Lean core export, the default for Mathlib.
  */
 const INDEX_REPO = params.get('repo') ?? 'mathlib'
@@ -386,7 +386,7 @@ export function App() {
         <h1>trust</h1>
         <p className="error">Could not load the index: {error}</p>
         <p>
-          Generate one with <code>trust export --repo core --out web/public/index Init</code>.
+          Generate one with <code>trust export --repo core --out public/index Init</code>.
         </p>
       </div>
     )
