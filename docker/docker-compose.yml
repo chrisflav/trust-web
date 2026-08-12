@@ -54,7 +54,7 @@ services:
       # directory under here publishes a new index without rebuilding anything.
       - ${INDEX_DIR:-../public/index}:/usr/share/nginx/html/index:ro
     ports:
-      - "${BIND_ADDR:-127.0.0.1}:${WEB_PORT:-5174}:80"
+      - "${BIND_ADDR:-127.0.0.1}:${WEB_PORT:-5174}:8080"
     depends_on:
       - node
     restart: unless-stopped

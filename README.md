@@ -69,6 +69,12 @@ none has been generated under `public/index`.
 
 ## Deploying
 
+`docker/Dockerfile.web` builds a **20 MB** image: the bundle, and an nginx
+small enough that almost all of it is nginx.  It runs as an unprivileged user
+(uid 101) and listens on 8080, because a port below 1024 is one that user
+cannot bind.
+
+
 The frontend and a node go on **one origin**, and that is worth insisting on:
 same-origin means no CORS at all and a first-party session cookie, which
 browsers increasingly refuse to send cross-site however correctly it is
