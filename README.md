@@ -66,6 +66,64 @@ npm test
 The suite includes a check against a real exported index, which is skipped when
 none has been generated under `public/index`.
 
+
+## Deploying
+
+The frontend and a node go on **one origin**, and that is worth insisting on:
+same-origin means no CORS at all and a first-party session cookie, which
+browsers increasingly refuse to send cross-site however correctly it is
+labelled.  A reverse proxy holds the TLS and routes by prefix:
+
+```
+/        the frontend            (this repository's nginx image)
+/index/  exported indexes        (the same nginx, from a bind mount)
+/api/    the node                (chrisflav/trust-server)
+/auth/   the node's GitHub sign-in
+```
+
+`docker/docker-compose.yml` brings both up, bound to loopback:
+
+```bash
+cd docker
+cp .env.example .env && $EDITOR .env
+docker compose up --build -d
+```
+
+The node is built from its own repository, so there is no second clone to keep
+in step; the first build fetches the Lean toolchain and takes a few minutes.
+
+Then put a proxy in front.  `deploy/trust.example.org.conf` is an Apache vhost
+for exactly the arrangement above:
+
+```bash
+a2enmod proxy proxy_http ssl headers rewrite
+cp deploy/trust.example.org.conf /etc/apache2/sites-available/trust.conf
+$EDITOR /etc/apache2/sites-available/trust.conf     # the ServerName
+a2ensite trust && apachectl configtest && systemctl reload apache2
+certbot --apache -d trust.example.org
+```
+
+Three things that are the same value, and break quietly when they are not:
+`PUBLIC_URL`, the `VITE_TRUST_SERVER` baked into the bundle (compose derives it
+from `PUBLIC_URL`), and the GitHub OAuth App's callback, which must be
+`${PUBLIC_URL}/auth/github/callback`.
+
+`VITE_TRUST_SERVER` is substituted into the bundle at build time rather than
+read at run time — that is how Vite works — so changing `PUBLIC_URL` means
+`docker compose up --build web`, not a restart.
+
+### Publishing an index
+
+```bash
+cd /path/to/mylibrary
+lake env /path/to/trust/.lake/build/bin/trust export \
+  --repo mylibrary --out /path/to/index --with-bodies --with-code MyLibrary
+```
+
+`INDEX_DIR` is bind-mounted read-only, so replacing a directory under it
+publishes a new index without rebuilding or restarting anything.  The frontend
+selects one with `?repo=mylibrary`.
+
 ## License
 
 [Apache License 2.0](LICENSE).
