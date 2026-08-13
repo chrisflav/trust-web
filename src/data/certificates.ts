@@ -88,10 +88,29 @@ export interface Identity {
   local?: boolean
 }
 
-/** The server baked in at build time, which is only the starting point. */
-export const DEFAULT_SERVER =
-  ((import.meta as unknown as { env?: Record<string, string | undefined> }).env
-    ?.VITE_TRUST_SERVER ?? '')
+/**
+ * Where to look for a node before anyone has chosen one.
+ *
+ * `VITE_TRUST_SERVER` is substituted into the bundle at build time — that is how
+ * Vite works — so a build that names a node is a build that can only ever talk
+ * to that node.  For a published image that is useless: it would have to be
+ * rebuilt per deployment, which is the opposite of publishing one.
+ *
+ * So an unset `VITE_TRUST_SERVER` means *this page's own origin*, which is
+ * exactly the arrangement `deploy/` describes — the frontend at `/` and the node
+ * at `/api/` behind one proxy — and is also what makes the session cookie
+ * first-party.  A build that does name a node still wins, for the case where the
+ * two really are on different origins.
+ *
+ * `window` is guarded because this module is also loaded by tests, which have no
+ * page for it to be the origin of.
+ */
+export const DEFAULT_SERVER = (() => {
+  const baked = (import.meta as unknown as { env?: Record<string, string | undefined> }).env
+    ?.VITE_TRUST_SERVER
+  if (baked) return baked.replace(/\/+$/, '')
+  return typeof window === 'undefined' ? '' : window.location.origin
+})()
 
 const SERVER_KEY = 'trust:server'
 

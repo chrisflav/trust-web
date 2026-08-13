@@ -1,0 +1,103 @@
+# Build the image on every pull request; publish it from master.
+#
+# The build is not the test.  An image that builds can still be one that binds a
+# port it cannot bind, or serves the bundle without the config that makes
+# `decls.jsonl` gzip — both of which have happened here.  So every run starts the
+# image it just built and asks it for the three things `nginx.conf` exists to do,
+# and only a run that passes that publishes anything.
+name: Image
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Only for a push: a pull request from a fork has no business holding a
+      # token that can write packages, and does not need one to build.
+      - name: Log in to ghcr.io
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=long
+            type=ref,event=pr
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.web
+          # No `VITE_TRUST_SERVER`: unset means "this page's own origin", which
+          # is what makes one published image usable behind anybody's proxy.
+          # Naming a node here would bake this image to one deployment.
+          push: false
+          load: true
+          tags: trust-web:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Prove it runs
+        run: |
+          set -euo pipefail
+          mkdir -p index/demo
+          printf '{"repo":"demo"}\n' > index/demo/meta.json
+          # A file big enough that gzip has something to do.
+          head -c 200000 /dev/urandom | base64 > index/demo/decls.jsonl
+          docker run -d --name web -p 127.0.0.1:8080:8080 \
+            -v "$PWD/index:/usr/share/nginx/html/index:ro" trust-web:ci
+          for _ in $(seq 1 30); do
+            curl -sS -m 2 -o /dev/null http://127.0.0.1:8080/ && break || sleep 1
+          done
+
+          echo "runs as: $(docker exec web id -u)"
+          test "$(docker exec web id -u)" != "0"
+
+          # The bundle.
+          test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/)" = 200
+          # An unknown route is the SPA, not a 404.
+          test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/some/route)" = 200
+          # A missing shard is a 404, not the SPA: the frontend must not be
+          # handed index.html where it expects an edge file.
+          test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/index/demo/nope.jsonl)" = 404
+          # `.jsonl` is JSON and it gzips.  This is most of the load time of a
+          # real index, so it is worth a test rather than a comment.
+          curl -sS -H 'Accept-Encoding: gzip' -D headers -o /dev/null \
+            http://127.0.0.1:8080/index/demo/decls.jsonl
+          grep -qi '^content-type: application/json' headers
+          grep -qi '^content-encoding: gzip' headers
+          echo "content-type and gzip confirmed"
+          docker rm -f web
+
+      - name: Publish
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.web
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
