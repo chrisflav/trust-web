@@ -69,6 +69,23 @@ none has been generated under `public/index`.
 
 ## Deploying
 
+Both images are published by CI on every push to master, so a deployment pulls
+rather than builds:
+
+```
+ghcr.io/chrisflav/trust-web:latest      20 MB
+ghcr.io/chrisflav/trust-server:latest  534 MB
+```
+
+The first `docker compose pull` needs the packages to be public — GitHub makes a
+new one private, and it is a one-time change under the package settings — or a
+`docker login ghcr.io`.
+
+The published frontend carries **no baked node**: an unset `VITE_TRUST_SERVER`
+means this page's own origin, which is exactly the arrangement below, so one image
+serves every deployment.  Pass `VITE_TRUST_SERVER` at build time only if the
+node lives on a different origin from the frontend.
+
 `docker/Dockerfile.web` builds a **20 MB** image: the bundle, and an nginx
 small enough that almost all of it is nginx.  It runs as an unprivileged user
 (uid 101) and listens on 8080, because a port below 1024 is one that user
