@@ -77,9 +77,8 @@ ghcr.io/chrisflav/trust-web:latest      20 MB
 ghcr.io/chrisflav/trust-server:latest  534 MB
 ```
 
-The first `docker compose pull` needs the packages to be public — GitHub makes a
-new one private, and it is a one-time change under the package settings — or a
-`docker login ghcr.io`.
+Both are public: an anonymous `docker pull ghcr.io/chrisflav/trust-web:latest`
+works, so a deployment needs no registry login.
 
 The published frontend carries **no baked node**: an unset `VITE_TRUST_SERVER`
 means this page's own origin, which is exactly the arrangement below, so one image
