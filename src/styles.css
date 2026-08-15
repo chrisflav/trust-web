@@ -1764,3 +1764,22 @@ h1 {
 .index-cancel {
   margin-top: 14px;
 }
+
+/* A name that nothing checked, shown as one.  §4.4's hints travel with a
+   relayed entry and a receiving node must mark them unverified; presenting one
+   in the same voice as an account this node authenticated would be the whole
+   mistake this project exists to avoid. */
+.certificate-issuer.unverified {
+  color: var(--muted);
+}
+
+.certificate-unverified {
+  margin-left: 5px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}

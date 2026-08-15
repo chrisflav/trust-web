@@ -35,6 +35,68 @@ export interface Certificate {
   /** Exactly what was signed, so the check can be repeated here. */
   canonical: string
   provenance: Provenance
+  /**
+   * §4.4's hints: what the node that made the entry says about it.
+   *
+   * A name is not a signature.  For a local entry the node knows the account it
+   * authenticated; for a relayed one this is a string a stranger's node typed,
+   * and `hintsVerified` is false — which is why it is shown as a claim about
+   * the issuer rather than as the issuer.
+   */
+  hints?: { issuer?: string; keyVerifiedVia?: string; origin?: string }
+  hintsVerified?: boolean
+}
+
+/** Who a certificate says made it, and whether anything backs that. */
+export interface Issuer {
+  text: string
+  verified: boolean
+  /** Why it reads the way it does, for the reader who hovers. */
+  why: string
+}
+
+/**
+ * What to show where a person's name goes.
+ *
+ * Never "unknown" while anything is known: a fingerprint identifies a key
+ * exactly, and is a better answer than a shrug even though it is harder to
+ * read.  A relayed entry's name is shown as well — dropping it loses something
+ * a reader wants — but marked, because the alternative is to present a
+ * stranger's assertion in the same voice as a checked one.
+ */
+export function issuerOf(certificate: Certificate): Issuer {
+  const local = certificate.provenance?.local !== false
+  const name = certificate.issuer || certificate.hints?.issuer || ''
+  const fingerprint = certificate.fingerprint?.slice(-16) ?? ''
+
+  if (name && local) {
+    return {
+      text: name,
+      verified: true,
+      why: `${name} was signed in to this node when the certificate was made.`,
+    }
+  }
+  if (name) {
+    return {
+      text: name,
+      verified: false,
+      why:
+        `“${name}” is what ${certificate.provenance?.origin || 'another node'} says, ` +
+        'and nothing here can check a name. The signature is what carries weight.',
+    }
+  }
+  if (fingerprint) {
+    return {
+      text: fingerprint,
+      verified: certificate.assurance === 'signed',
+      why: 'No account name travelled with this entry; this is the last 16 of the signing key.',
+    }
+  }
+  return {
+    text: 'anonymous',
+    verified: false,
+    why: 'This entry names neither an account nor a key.',
+  }
 }
 
 export interface Answer {
