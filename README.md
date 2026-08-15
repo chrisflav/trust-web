@@ -48,6 +48,35 @@ Because the index is static, a deployment is a plain set of files behind a web
 server; `docker/Dockerfile.web` and `docker/nginx.conf` build that image, with
 the index bind-mounted rather than baked in.
 
+### Reading a library nobody deployed
+
+An index can also be read straight from the repository that produced it.  A
+library whose CI runs the action with `publish: branch` force-pushes its index
+to a `trust-index` branch, and `?gh=` reads it from there:
+
+```
+https://trust.example.org/?gh=lana-agents/formal-schemes
+```
+
+A visit that names no index is **asked** which library to read, rather than
+shown one it did not choose.  The answer is kept in `sessionStorage`, so the
+question comes once per session and a link that carries `?gh=` still wins; the
+picker beside the title reopens the dialog to change it.
+
+It takes the same thing typed by hand — `owner/repo`, a `github.com` URL, or a
+bare name for one of the indexes this deployment serves itself — and offers
+back what this browser has read before.  It cannot offer a menu of what exists:
+`raw.githubusercontent.com` has no listing, and `/index/` is served with
+`try_files … =404`, so there is nothing to enumerate.
+
+This reads a **branch**, not the workflow artifact, and that is forced rather
+than chosen: downloading an artifact needs a token with the `repo` scope even
+for a public repository, so a page that read artifacts would have to ask every
+reader for full control of their private repositories to show them a public
+dependency graph.  A branch is anonymous, and it arrives with
+`Access-Control-Allow-Origin: *` and gzip — so the same reader that loads a
+local index loads a published one, lazy code shards and all.
+
 ## Marks
 
 Human judgements — trusted, characterized, protected — live in
