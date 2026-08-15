@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import * as openpgp from 'openpgp'
-import { canonicalClaim, verifyHere, type Certificate, type Claim } from './certificates'
+import { canonicalClaim, issuerOf, verifyHere, type Certificate, type Claim } from './certificates'
 
 /**
  * A claim canonicalised by `Trust/Cert.lean`, copied verbatim.
@@ -153,5 +153,59 @@ describe('verifyHere', () => {
       ok: false,
       reason: expect.stringContaining('public key'),
     })
+  })
+})
+
+describe('issuerOf', () => {
+  const base = {
+    claim: GOLDEN_CLAIM,
+    issuer: '',
+    avatarUrl: '',
+    signature: null,
+    fingerprint: null,
+    key: null,
+    assurance: 'attested' as const,
+    keyVerifiedVia: null,
+    canonical: GOLDEN_CANONICAL,
+    provenance: { local: true, origin: '', fromPeer: '', verifiedHere: false, fetchedAt: null },
+  }
+
+  it('names the account a local node authenticated', () => {
+    expect(issuerOf({ ...base, issuer: 'chrisflav' })).toMatchObject({
+      text: 'chrisflav',
+      verified: true,
+    })
+  })
+
+  // The node answers §7.4 with the name under `hints`, which is where §4.4 puts
+  // it.  Reading only the top level showed "unknown" for every certificate this
+  // node had ever issued.
+  it('reads the name from hints when that is where it is', () => {
+    expect(issuerOf({ ...base, hints: { issuer: 'chrisflav' } })).toMatchObject({
+      text: 'chrisflav',
+      verified: true,
+    })
+  })
+
+  it('marks a relayed name unverified, and says whose word it is', () => {
+    const relayed = issuerOf({
+      ...base,
+      hints: { issuer: 'stranger' },
+      hintsVerified: false,
+      provenance: { ...base.provenance, local: false, origin: 'https://elsewhere.example' },
+    })
+    expect(relayed.text).toBe('stranger')
+    expect(relayed.verified).toBe(false)
+    expect(relayed.why).toContain('elsewhere.example')
+  })
+
+  it('falls back to the key, which identifies exactly even unnamed', () => {
+    expect(
+      issuerOf({ ...base, fingerprint: 'aaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbcccccccc', assurance: 'signed' }),
+    ).toMatchObject({ text: 'bbbbbbbbcccccccc', verified: true })
+  })
+
+  it('never says "unknown"', () => {
+    expect(issuerOf(base).text).toBe('anonymous')
   })
 })

@@ -3,6 +3,7 @@ import {
   followIdentity,
   followKey,
   hasServer,
+  issuerOf,
   signInUrl,
   unfollowIdentity,
   unfollowKey,
@@ -149,10 +150,15 @@ export function WhoTrusts({
         const followed = certificate.fingerprint
           ? followingKeys.has(certificate.fingerprint)
           : following.has(certificate.issuer)
+        const issuer = issuerOf(certificate)
         return (
           <div className="certificate" key={id}>
-            <span className="certificate-issuer">
-              {certificate.issuer || certificate.fingerprint?.slice(-16) || 'unknown'}
+            <span
+              className={`certificate-issuer${issuer.verified ? '' : ' unverified'}`}
+              title={issuer.why}
+            >
+              {issuer.text}
+              {!issuer.verified && <span className="certificate-unverified">unverified</span>}
             </span>
             <span
               className={`certificate-assurance ${certificate.assurance}`}
