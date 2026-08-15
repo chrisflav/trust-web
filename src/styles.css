@@ -1617,3 +1617,150 @@ h1 {
   color: var(--axiom);
   font-size: 12px;
 }
+
+/* Which library's index is being read.  A sibling of the server picker in
+   spirit — both say "you are looking at this one, click for another" — but it
+   sits in the header rather than the controls, because it is the one choice
+   the whole page is downstream of. */
+.index-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.index-picker:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.index-name {
+  font-weight: 600;
+}
+
+/* Says where the bytes come from, since a published index is fetched from
+   GitHub rather than from this deployment. */
+.index-origin {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+
+/* Picking a library.  A real <dialog>, so the backdrop, the focus trap and the
+   top layer come from the platform rather than from a div pretending. */
+.index-dialog {
+  max-width: 460px;
+  padding: 20px 22px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.index-dialog::backdrop {
+  background: rgb(0 0 0 / 0.5);
+}
+
+.index-dialog h2 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+.index-dialog h3 {
+  margin: 16px 0 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.index-lede {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.index-entry {
+  display: flex;
+  gap: 6px;
+}
+
+.index-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.index-dialog button {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.index-dialog button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.index-dialog button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* What this browser has read before.  Not a directory of what exists: nothing
+   can produce one, which is why the field above is a field. */
+.index-recent {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.index-recent li {
+  display: inline-flex;
+  align-items: center;
+}
+
+.index-recent .current {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.index-forget {
+  margin-left: -1px;
+  padding: 4px 7px;
+  color: var(--muted);
+}
+
+.index-hint {
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.index-cancel {
+  margin-top: 14px;
+}

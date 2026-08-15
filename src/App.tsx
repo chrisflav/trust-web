@@ -12,6 +12,16 @@ import { pathTo, trustedCutSource } from './data/trustedMode'
 import { WhoTrusts } from './components/WhoTrusts'
 import { FollowPanel } from './components/FollowPanel'
 import { ServerPicker } from './components/ServerPicker'
+import { IndexDialog, IndexPicker } from './components/IndexPicker'
+import {
+  indexBase,
+  indexRoot,
+  locationFromParams,
+  paramsForLocation,
+  rememberLocation,
+  sessionLocation,
+  setSessionLocation,
+} from './data/indexLocation'
 import {
   currentIdentity,
   hasServer,
@@ -22,18 +32,22 @@ import {
 } from './data/certificates'
 import { defaultHidden, loadHidden, saveHidden, type HiddenConfig } from './data/hidden'
 
-const INDEX_BASE = '/index'
-
 /** Initial view state, so that a particular declaration can be linked to. */
 const params = new URLSearchParams(window.location.search)
 /**
- * Which exported index to read.
+ * Which exported index to read, and where from.
  *
  * `trust export --repo <name>` writes one directory per repository, so several
- * can sit side by side under `public/index` and `?repo=` chooses between
- * them — `?repo=core` for the Lean core export, the default for Mathlib.
+ * sit side by side under one root and the name chooses between them —
+ * `?repo=core` for the Lean core export, the default for Mathlib.  `?gh=` reads
+ * one a library published from its own CI instead; see `data/indexLocation`.
  */
-const INDEX_REPO = params.get('repo') ?? 'mathlib'
+/**
+ * The address bar first, then what this session already picked, then nobody:
+ * a link that names an index means that index, a reader who has chosen one is
+ * not asked again, and a first visit is asked rather than guessed at.
+ */
+const LOCATION = locationFromParams(params) ?? sessionLocation()
 const INITIAL_DECL = params.get('decl') ?? 'Nat.gcd'
 const INITIAL_DIRECTION: Direction = params.get('dir') === 'dependents' ? 'dependents' : 'dependencies'
 const INITIAL_DEPTH = Number(params.get('depth') ?? 2)
@@ -98,16 +112,22 @@ export function App() {
   const loadStarted = useRef(false)
 
   useEffect(() => {
-    if (loadStarted.current) return
+    if (loadStarted.current || !LOCATION) return
     loadStarted.current = true
     // Marks are small and independent of the index, so a failure to load them
     // must not stop the graph from coming up.
-    loadMarks(`${INDEX_BASE}/${INDEX_REPO}`)
+    loadMarks(indexBase(LOCATION))
       .then(setMarks)
       .catch(() => {})
-    StaticIndexSource.load(INDEX_BASE, INDEX_REPO, setProgress)
+    StaticIndexSource.load(indexRoot(LOCATION), LOCATION.name, setProgress)
       .then((loaded) => {
         setSource(loaded)
+        // Both only once it has loaded.  A repository that turned out to
+        // publish nothing is not one to offer back as somewhere the reader has
+        // been, and pinning it to the session would make a mistyped `?gh=`
+        // stick to every later reload.
+        rememberLocation(LOCATION)
+        setSessionLocation(LOCATION)
         // Prefer an exact name: `?decl=Eq` must land on `Eq`, not on some
         // longer declaration that merely contains it.
         const initial = loaded.findByName(INITIAL_DECL) ?? loaded.search(INITIAL_DECL, 1)[0]?.id
@@ -150,11 +170,11 @@ export function App() {
 
   // Keep the address bar in step with the view, without adding history entries.
   useEffect(() => {
-    if (!source || root === null) return
-    // `repo` is carried through so that a reload, or a shared link, stays on the
-    // index the view is actually showing.
+    if (!source || root === null || !LOCATION) return
+    // The index is carried through so that a reload, or a shared link, stays on
+    // the one the view is actually showing.
     const next = new URLSearchParams({
-      repo: INDEX_REPO,
+      ...paramsForLocation(LOCATION),
       decl: source.node(root).name,
       dir: direction,
       depth: String(depth),
@@ -380,14 +400,35 @@ export function App() {
     [marks, source],
   )
 
+  // Nothing has been picked: a first visit, or a session that has not chosen.
+  // The dialog is the page rather than something over it, and it cannot be
+  // dismissed, because there is nothing behind it to dismiss it onto.
+  if (!LOCATION) {
+    return (
+      <div className="app-message">
+        <h1>trust</h1>
+        <IndexDialog current={null} />
+      </div>
+    )
+  }
+
   if (error) {
     return (
       <div className="app-message">
         <h1>trust</h1>
         <p className="error">Could not load the index: {error}</p>
-        <p>
-          Generate one with <code>trust export --repo core --out public/index Init</code>.
-        </p>
+        {LOCATION.kind === 'github' ? (
+          <p>
+            {LOCATION.owner}/{LOCATION.repo} does not appear to publish one on its{' '}
+            <code>{LOCATION.branch}</code> branch. A repository publishes an index by running{' '}
+            <code>chrisflav/trust-action</code> in its CI.
+          </p>
+        ) : (
+          <p>
+            Generate one with <code>trust export --repo core --out public/index Init</code>.
+          </p>
+        )}
+        <IndexPicker current={LOCATION} />
       </div>
     )
   }
@@ -421,6 +462,7 @@ export function App() {
             ? 'This runs once per index; the page stays put until it is ready.'
             : `${formatBytes(progress!.loaded)} of ${formatBytes(progress!.total)} · ${percent}%`}
         </p>
+        <IndexPicker current={LOCATION} />
       </div>
     )
   }
@@ -468,6 +510,7 @@ export function App() {
     <div className="app">
       <header>
         <h1>trust</h1>
+        <IndexPicker current={LOCATION} />
         <div className="meta">
           {meta.repo} @ Lean {meta.toolchain} · {meta.declCount.toLocaleString()} declarations ·{' '}
           {meta.stmtEdgeCount.toLocaleString()} statement edges
