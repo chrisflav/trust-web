@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
+  asBranch,
+  asRelease,
   clearSessionLocation,
   DEFAULT_BRANCH,
   DEFAULT_TAG,
@@ -306,5 +308,53 @@ describe('release-published indexes', () => {
       forgetLocation(RELEASED)
       expect(recentLocations()).not.toContainEqual(RELEASED)
     })
+  })
+})
+
+/**
+ * Reading the other way.
+ *
+ * Nothing in `owner/repo` says whether a repository publishes to a branch or to
+ * a release, so a reader who guesses wrong sees a missing index.  The failure
+ * offers the other guess as a link, and these are what it is built from.
+ */
+describe('asRelease and asBranch', () => {
+  const BRANCH: IndexLocation = {
+    kind: 'github',
+    owner: 'chrisflav',
+    repo: 'HodgeConjecture',
+    branch: DEFAULT_BRANCH,
+    name: 'HodgeConjecture',
+  }
+  const RELEASE: IndexLocation = {
+    kind: 'release',
+    owner: 'chrisflav',
+    repo: 'HodgeConjecture',
+    tag: DEFAULT_TAG,
+    name: 'HodgeConjecture',
+  }
+
+  it('turns a branch location into the release of the same repository', () => {
+    expect(asRelease(BRANCH)).toEqual(RELEASE)
+  })
+
+  it('turns a release location into the branch of the same repository', () => {
+    expect(asBranch(RELEASE)).toEqual(BRANCH)
+  })
+
+  // The name is `--repo` at export time, not a property of where the export
+  // was put, so it has to survive the trip.
+  it('carries a non-default index name across', () => {
+    const named = { ...BRANCH, name: 'hodge' }
+    expect(asRelease(named)).toEqual({ ...RELEASE, name: 'hodge' })
+    expect(asBranch(asRelease(named))).toEqual(named)
+  })
+
+  it('leaves anything else alone', () => {
+    const local: IndexLocation = { kind: 'local', name: 'core' }
+    expect(asRelease(local)).toBe(local)
+    expect(asBranch(local)).toBe(local)
+    expect(asRelease(RELEASE)).toBe(RELEASE)
+    expect(asBranch(BRANCH)).toBe(BRANCH)
   })
 })
