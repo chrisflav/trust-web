@@ -745,18 +745,51 @@ const indeterminateReportBytes = 1 << 20
  * Shared by the worker and the inline fallback so that both read exactly the
  * same bytes.
  */
+/**
+ * Address one part of an index.
+ *
+ * `version` exists for release-published indexes and for nothing else.  GitHub
+ * serves release assets through a CDN that caches them by URL, and replacing an
+ * asset does not evict what is cached: for a few minutes after a publish, the
+ * old bytes are still what a download returns.  Stale would be survivable —
+ * half-stale is not.  `decls.jsonl` decides what a node id means and the edge
+ * files are written in terms of those ids, so an old declaration table beside
+ * new edges is not a stale graph but a wrong one, drawn without complaint.
+ *
+ * So the revision goes in the URL.  `meta.json` is fetched with a token that
+ * cannot have been seen before, which forces the CDN to go to the origin for
+ * it, and every other part is then asked for at the revision that `meta.json`
+ * just named.  The first reader after a publish pays one miss per file; every
+ * reader after that hits the cache, because the URL is stable for as long as
+ * the index is.
+ */
+function partUrl(base: string, path: string, version: string | null): string {
+  return version === null ? `${base}/${path}` : `${base}/${path}?v=${encodeURIComponent(version)}`
+}
+
+/**
+ * Everything the loader needs to read an index, with the parts version-pinned
+ * when the location calls for it.
+ */
 export async function fetchIndexParts(
   base: string,
   onProgress?: (progress: LoadProgress) => void,
+  versioned = false,
 ): Promise<{
   metaText: string
   declText: string
   stmtPairs: Int32Array
   bodyPairs: Int32Array
   meta: IndexMeta
+  version: string | null
 }> {
-  const metaText = await fetch(`${base}/meta.json`).then((r) => r.text())
+  const metaUrl = versioned ? `${base}/meta.json?t=${Date.now()}` : `${base}/meta.json`
+  const metaText = await fetch(metaUrl).then((r) => r.text())
   const meta: IndexMeta = JSON.parse(metaText)
+  // `rev` is what the exporter recorded; an index written before it existed, or
+  // by something that left it empty, still has to load, so the fallback is the
+  // counts — which change whenever the library does.
+  const version = versioned ? (meta.rev || `${meta.declCount}-${meta.stmtEdgeCount}`) : null
 
   // An edge is exactly eight bytes, so the edge files' sizes are known from
   // `meta.json` before any of them has arrived; only the declaration table has
@@ -764,7 +797,7 @@ export async function fetchIndexParts(
   // it is the only party that knows the file's real size, since by the time the
   // browser sees it the server may have compressed it — and the header is the
   // fallback for indices exported before that field existed.
-  const declResponse = await fetch(`${base}/decls.jsonl`)
+  const declResponse = await fetch(partUrl(base, 'decls.jsonl', version))
   // A missing edge file is survivable, but a missing declaration table is not:
   // `try_files $uri =404` answers with an HTML error page, and read as JSONL
   // that is an index of no declarations rather than a failure anyone can see.
@@ -816,16 +849,16 @@ export async function fetchIndexParts(
   }
   const [declBody, stmtPairs, bodyPairs] = await Promise.all([
     readBody(declResponse, report),
-    asPairs(`${base}/stmt-edges.bin`, meta.stmtEdgeCount * 8),
+    asPairs(partUrl(base, 'stmt-edges.bin', version), meta.stmtEdgeCount * 8),
     meta.hasBodyEdges
-      ? asPairs(`${base}/body-edges.bin`, bodyEdgeBytes)
+      ? asPairs(partUrl(base, 'body-edges.bin', version), bodyEdgeBytes)
       : Promise.resolve(new Int32Array(0)),
   ])
   // Everything has arrived, so however good the estimate was, the bytes read
   // are now the whole of what there was to read.  Saying so is what leaves the
   // bar full instead of stuck a percent short as the build phase takes over.
   onProgress?.({ phase: 'fetch', loaded, total: loaded })
-  return { metaText, declText: new TextDecoder().decode(declBody), stmtPairs, bodyPairs, meta }
+  return { metaText, declText: new TextDecoder().decode(declBody), stmtPairs, bodyPairs, meta, version }
 }
 
 /**
@@ -879,14 +912,15 @@ export function buildIndexPayload(
 /** What the index worker sends back while and after it works. */
 export type WorkerMessage =
   | { type: 'progress'; progress: LoadProgress }
-  | { type: 'done'; payload: IndexPayload; hasCode: boolean }
+  | { type: 'done'; payload: IndexPayload; hasCode: boolean; version: string | null }
   | { type: 'error'; error: string }
 
 /** Run one index build in a dedicated worker, then let the worker go. */
 function buildIndexInWorker(
   base: string,
   onProgress?: (progress: LoadProgress) => void,
-): Promise<{ payload: IndexPayload; hasCode: boolean }> {
+  versioned = false,
+): Promise<{ payload: IndexPayload; hasCode: boolean; version: string | null }> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('./indexWorker.ts', import.meta.url), { type: 'module' })
     worker.onmessage = (event: MessageEvent<WorkerMessage>) => {
@@ -896,14 +930,15 @@ function buildIndexInWorker(
         return
       }
       worker.terminate()
-      if (message.type === 'done') resolve({ payload: message.payload, hasCode: message.hasCode })
+      if (message.type === 'done')
+        resolve({ payload: message.payload, hasCode: message.hasCode, version: message.version })
       else reject(new Error(message.error))
     }
     worker.onerror = (event) => {
       worker.terminate()
       reject(new Error(event.message || 'index worker failed to start'))
     }
-    worker.postMessage({ base })
+    worker.postMessage({ base, versioned })
   })
 }
 
@@ -911,6 +946,8 @@ function buildIndexInWorker(
 export class StaticIndexSource implements GraphSource {
   /** Base URL for lazily fetched code shards; unset when built from text. */
   private codeBase: string | null = null
+  /** Pins lazily fetched shards to the revision the rest of the index came from. */
+  private codeVersion: string | null = null
   private readonly codeShards = new Map<number, Promise<Map<NodeId, DeclCode>>>()
 
   private constructor(
@@ -935,19 +972,23 @@ export class StaticIndexSource implements GraphSource {
     baseUrl: string,
     repo: string,
     onProgress?: (progress: LoadProgress) => void,
+    versioned = false,
   ): Promise<StaticIndexSource> {
     const base = `${baseUrl}/${repo}`
     if (typeof Worker !== 'undefined') {
       try {
-        const { payload, hasCode } = await buildIndexInWorker(base, onProgress)
+        const { payload, hasCode, version } = await buildIndexInWorker(base, onProgress, versioned)
         const source = StaticIndexSource.fromPayload(payload)
-        if (hasCode) source.codeBase = base
+        if (hasCode) {
+          source.codeBase = base
+          source.codeVersion = version
+        }
         return source
       } catch {
         // Fall through and build inline.
       }
     }
-    const parts = await fetchIndexParts(base, onProgress)
+    const parts = await fetchIndexParts(base, onProgress, versioned)
     onProgress?.({ phase: 'build', loaded: 0, total: 0 })
     const source = StaticIndexSource.fromParts(
       parts.metaText,
@@ -955,7 +996,10 @@ export class StaticIndexSource implements GraphSource {
       parts.stmtPairs,
       parts.bodyPairs,
     )
-    if (parts.meta.hasCode) source.codeBase = base
+    if (parts.meta.hasCode) {
+      source.codeBase = base
+      source.codeVersion = parts.version
+    }
     return source
   }
 
@@ -1104,8 +1148,7 @@ export class StaticIndexSource implements GraphSource {
       if (this.codeShards.size >= 4) {
         this.codeShards.delete(this.codeShards.keys().next().value!)
       }
-      const base = this.codeBase
-      pending = fetch(`${base}/code/${shard}.jsonl`)
+      pending = fetch(partUrl(this.codeBase, `code/${shard}.jsonl`, this.codeVersion))
         .then((response) => (response.ok ? response.text() : ''))
         .then((text) => {
           const entries = new Map<NodeId, DeclCode>()

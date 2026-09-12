@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   DEFAULT_BRANCH,
+  DEFAULT_TAG,
   describeLocation,
+  indexBase,
   forgetLocation,
   parseGitHubLocation,
   paramsForLocation,
@@ -24,18 +26,41 @@ function go(location: IndexLocation): void {
   window.location.assign(`?${new URLSearchParams(paramsForLocation(location))}`)
 }
 
+/** How a repository publishes its index, which the reader has to say. */
+export type PublishedAs = 'branch' | 'release'
+
 /**
  * What was typed, as a location.
  *
  * A slash or a dot means a repository; anything else names a directory under
  * the deployment's own `/index/`, which is how a self-hosted index is selected
  * and still the fastest thing to type for one that is deployed.
+ *
+ * A repository needs one more thing said about it than its name, because the
+ * two ways of publishing are not distinguishable from outside: an index on a
+ * `trust-index` branch and one on a `trust-index` release are fetched from
+ * different hosts by different rules, and nothing in `owner/repo` says which
+ * exists.  Guessing would mean two speculative requests on every keystroke, so
+ * the dialog asks instead.
  */
-function parse(text: string): IndexLocation | null {
+function parse(text: string, publishedAs: PublishedAs): IndexLocation | null {
   const trimmed = text.trim()
   if (!trimmed) return null
-  if (trimmed.includes('/') || trimmed.includes('.')) return parseGitHubLocation(trimmed)
-  return { kind: 'local', name: trimmed }
+  if (!trimmed.includes('/') && !trimmed.includes('.')) return { kind: 'local', name: trimmed }
+
+  const parsed = parseGitHubLocation(trimmed)
+  if (!parsed || parsed.kind !== 'github') return parsed
+  if (publishedAs === 'branch') return parsed
+  return {
+    kind: 'release',
+    owner: parsed.owner,
+    repo: parsed.repo,
+    tag: DEFAULT_TAG,
+    // `parseGitHubLocation` reads a name out of a `/tree/<branch>/<name>` URL,
+    // which is a branch's spelling; the name it defaults to is the repository's,
+    // and that is the part worth keeping here.
+    name: parsed.name,
+  }
 }
 
 interface IndexDialogProps {
@@ -56,6 +81,13 @@ interface IndexDialogProps {
 export function IndexDialog({ current, onClose }: IndexDialogProps) {
   const ref = useRef<HTMLDialogElement>(null)
   const [value, setValue] = useState('')
+  // Starts at whatever is being read, so that changing library within a
+  // deployment that reads releases does not mean re-answering this every time.
+  // Branch otherwise: it is what every published index used before releases were
+  // an option, and the one that needs no proxy.
+  const [publishedAs, setPublishedAs] = useState<PublishedAs>(
+    current?.kind === 'release' ? 'release' : 'branch',
+  )
   const [recent, setRecent] = useState<IndexLocation[]>(recentLocations)
 
   // `showModal` rather than the `open` attribute: it is what gives the backdrop,
@@ -66,7 +98,7 @@ export function IndexDialog({ current, onClose }: IndexDialogProps) {
     dialog.showModal()
   }, [])
 
-  const parsed = parse(value)
+  const parsed = parse(value, publishedAs)
 
   const drop = (location: IndexLocation) => {
     forgetLocation(location)
@@ -117,6 +149,28 @@ export function IndexDialog({ current, onClose }: IndexDialogProps) {
           </button>
         </div>
 
+        {/*
+          Only for a repository: a bare name is an index this deployment serves
+          from its own `/index/`, where the question does not arise.
+        */}
+        {parsed && parsed.kind !== 'local' && (
+          <fieldset className="index-published">
+            <legend>published to a</legend>
+            {(['branch', 'release'] as const).map((choice) => (
+              <label key={choice}>
+                <input
+                  type="radio"
+                  name="published-as"
+                  value={choice}
+                  checked={publishedAs === choice}
+                  onChange={() => setPublishedAs(choice)}
+                />
+                {choice}
+              </label>
+            ))}
+          </fieldset>
+        )}
+
         {recent.length > 0 && (
           <>
             <h3>Read before</h3>
@@ -166,9 +220,7 @@ export function IndexDialog({ current, onClose }: IndexDialogProps) {
 
 /** Stable enough to key a list by; two indexes differ iff their URLs do. */
 function indexKey(location: IndexLocation): string {
-  return location.kind === 'local'
-    ? location.name
-    : `${location.owner}/${location.repo}/${location.branch}/${location.name}`
+  return indexBase(location)
 }
 
 /**

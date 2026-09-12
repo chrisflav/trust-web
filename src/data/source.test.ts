@@ -583,3 +583,72 @@ describe('repoOfModule', () => {
     expect(repoOfModule('Batteries.Data.List')).toBe('Batteries')
   })
 })
+/**
+ * Release-published indexes are read through a CDN that caches by URL and does
+ * not evict on replacement, so for a few minutes after a publish the old bytes
+ * are still what a download returns.  A wholly stale index is survivable; a
+ * half-stale one is not, because `decls.jsonl` decides what a node id means and
+ * the edge files are written in terms of those ids.  These pin down the
+ * addressing that keeps a reader on one side of a publish or the other.
+ */
+describe('version-pinned parts', () => {
+  const meta = {
+    schemaVersion: 1,
+    declCount: 1,
+    stmtEdgeCount: 0,
+    rev: 'abc1234',
+    hasBodyEdges: false,
+  }
+
+  function record(): string[] {
+    const asked: string[] = []
+    vi.stubGlobal('fetch', async (url: string) => {
+      asked.push(url)
+      if (url.includes('/meta.json')) return new Response(JSON.stringify(meta))
+      if (url.includes('/decls.jsonl')) {
+        return new Response('{"id":0,"name":"A","kind":"theorem","module":"M"}')
+      }
+      return new Response(new Uint8Array(0))
+    })
+    return asked
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('asks for nothing extra when the location does not need it', async () => {
+    const asked = record()
+    await fetchIndexParts('/index/test')
+    for (const url of asked) expect(url).not.toContain('?')
+  })
+
+  it('pins every part to the revision meta.json named', async () => {
+    const asked = record()
+    const parts = await fetchIndexParts('/release/o/r/trust-index/test', undefined, true)
+
+    expect(parts.version).toBe('abc1234')
+    // meta.json cannot be pinned to a revision it is the source of, so it gets
+    // a token that cannot have been cached instead.
+    const metaUrl = asked.find((url) => url.includes('/meta.json'))!
+    expect(metaUrl).toMatch(/\/meta\.json\?t=\d+$/)
+    // Everything else is asked for at that revision, so a reader gets one
+    // publish rather than parts of two.
+    for (const url of asked) {
+      if (url.includes('/meta.json')) continue
+      expect(url, url).toContain('?v=abc1234')
+    }
+  })
+
+  it('falls back to the counts when an index records no revision', async () => {
+    vi.stubGlobal('fetch', async (url: string) => {
+      if (url.includes('/meta.json')) {
+        return new Response(JSON.stringify({ ...meta, rev: '', declCount: 12, stmtEdgeCount: 34 }))
+      }
+      if (url.includes('/decls.jsonl')) return new Response('')
+      return new Response(new Uint8Array(0))
+    })
+    const parts = await fetchIndexParts('/release/o/r/trust-index/test', undefined, true)
+    expect(parts.version).toBe('12-34')
+  })
+})

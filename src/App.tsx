@@ -119,7 +119,7 @@ export function App() {
     loadMarks(indexBase(LOCATION))
       .then(setMarks)
       .catch(() => {})
-    StaticIndexSource.load(indexRoot(LOCATION), LOCATION.name, setProgress)
+    StaticIndexSource.load(indexRoot(LOCATION), LOCATION.name, setProgress, LOCATION.kind === 'release')
       .then((loaded) => {
         setSource(loaded)
         // Both only once it has loaded.  A repository that turned out to

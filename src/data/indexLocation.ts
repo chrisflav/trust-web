@@ -1,29 +1,55 @@
 /**
  * Which exported index this page is reading, and where it comes from.
  *
- * Two kinds, because there are two ways an index reaches a browser.  One is
+ * Three kinds, because there are three ways an index reaches a browser.  One is
  * served beside this bundle — `trust export --out public/index` writes it, the
  * deployment bind-mounts it, and it is the arrangement the frontend has always
- * had.  The other is published by CI to a branch of the library's own
+ * had.  The second is published by CI to a branch of the library's own
  * repository and read from `raw.githubusercontent.com`, which is what lets a
- * reader look at a development nobody deployed anything for.
+ * reader look at a development nobody deployed anything for.  The third is
+ * published to a release of that repository and read through this deployment's
+ * own `/release/` proxy.
  *
- * The remote kind is a branch rather than the workflow artifact the action
- * uploads, and that is not a preference.  Downloading an artifact requires a
- * token with the `repo` scope even when the repository is public, so a page
- * that read artifacts directly would have to ask every reader for full control
- * of their private repositories in order to show them a public dependency
- * graph.  A branch is anonymous, and `raw.githubusercontent.com` serves it with
- * `Access-Control-Allow-Origin: *` and gzip — so the reader below fetches it
- * with exactly the code that reads a local one, lazy code shards and all.
+ * None of them is the workflow artifact the action uploads, and that is not a
+ * preference.  Downloading an artifact requires a token with the `repo` scope
+ * even when the repository is public — the metadata is anonymous, the bytes are
+ * not — so a page that read artifacts directly would have to ask every reader
+ * for full control of their private repositories in order to show them a public
+ * dependency graph.
  *
- * What it costs: only repositories that publish can be read this way.  There is
- * no third option — GitHub gates artifact bytes behind a credential, and with
- * no server of our own there is nowhere to keep one that is not the reader's.
+ * Between the other two, the difference is where the CORS header comes from.
+ * `raw.githubusercontent.com` sends `Access-Control-Allow-Origin: *`, so a
+ * branch is readable by any copy of this frontend, served from anywhere, with
+ * no server behind it.  A release asset sends no such header and is served as
+ * an attachment besides, so it is readable only from an origin that proxies it
+ * — which this deployment does and a bare static copy does not.  What the
+ * library gets for that is a repository that does not carry its own index: an
+ * index is tens to hundreds of megabytes, and a branch keeps every byte of it
+ * in the history people clone for the mathematics.
+ *
+ * Either way the reader below fetches with exactly the code that reads a local
+ * index, lazy code shards and all.  What differs is the prefix, and — for a
+ * release — that the parts are pinned to a revision; see `partUrl` in
+ * `source.ts` for why that is not optional.
  */
 
 /** Where `raw.githubusercontent.com` serves a repository's branch from. */
 const RAW = 'https://raw.githubusercontent.com'
+
+/**
+ * Where this deployment proxies release assets.
+ *
+ * Same-origin and relative, which is the whole point: release assets are
+ * served without `Access-Control-Allow-Origin`, so a browser cannot read them
+ * cross-origin however the fetch is written.  What makes them readable is that
+ * they arrive from here instead — see `/release/` in `docker/nginx.conf`,
+ * which folds the path back into the flat asset name and follows GitHub's
+ * redirect on the page's behalf.
+ *
+ * A deployment without that proxy serves 404 here, and the picker says so
+ * rather than the page failing halfway through a load.
+ */
+const RELEASE = '/release'
 
 /** Indexes served beside this bundle, as the deployment's nginx mounts them. */
 const LOCAL_BASE = '/index'
@@ -38,6 +64,16 @@ const LOCAL_BASE = '/index'
 export const DEFAULT_BRANCH = 'trust-index'
 
 /**
+ * The tag `chrisflav/trust-action` hangs a published release off.
+ *
+ * The same constant as `DEFAULT_BRANCH` and for the same reason: a repository
+ * name has to be enough to find an index, or the picker is not a picker.  That
+ * they are equal is a coincidence of the action's defaults, not something
+ * either side should rely on.
+ */
+export const DEFAULT_TAG = 'trust-index'
+
+/**
  * There is no default index.
  *
  * A bare URL used to read `mathlib`, which was right when a deployment served
@@ -50,6 +86,7 @@ export const DEFAULT_BRANCH = 'trust-index'
 export type IndexLocation =
   | { kind: 'local'; name: string }
   | { kind: 'github'; owner: string; repo: string; branch: string; name: string }
+  | { kind: 'release'; owner: string; repo: string; tag: string; name: string }
 
 /**
  * The directory the index's own directory sits in.
@@ -60,6 +97,9 @@ export type IndexLocation =
  */
 export function indexRoot(location: IndexLocation): string {
   if (location.kind === 'local') return LOCAL_BASE
+  if (location.kind === 'release') {
+    return `${RELEASE}/${location.owner}/${location.repo}/${location.tag}`
+  }
   return `${RAW}/${location.owner}/${location.repo}/${location.branch}`
 }
 
@@ -75,7 +115,7 @@ export function describeLocation(location: IndexLocation): string {
 
 /** Where a reader would go to see the repository itself. */
 export function repositoryUrl(location: IndexLocation): string | null {
-  if (location.kind !== 'github') return null
+  if (location.kind === 'local') return null
   return `https://github.com/${location.owner}/${location.repo}`
 }
 
@@ -133,6 +173,24 @@ export function parseGitHubLocation(input: string): IndexLocation | null {
  * declaration — which is the whole of what makes one of these shareable.
  */
 export function locationFromParams(params: URLSearchParams): IndexLocation | null {
+  // `?release=` and `?gh=` take the same spellings of a repository and differ
+  // only in where the index is: a release's assets, or a branch's files.  Both
+  // are asked for by repository, because that is what a reader has.
+  const release = params.get('release')
+  if (release) {
+    const parsed = parseGitHubLocation(release)
+    if (parsed && parsed.kind === 'github') {
+      const tag = params.get('tag')
+      const name = params.get('name')
+      return {
+        kind: 'release',
+        owner: parsed.owner,
+        repo: parsed.repo,
+        tag: tag && SEGMENT.test(tag) ? tag : DEFAULT_TAG,
+        name: name && SEGMENT.test(name) ? name : parsed.name,
+      }
+    }
+  }
   const gh = params.get('gh')
   if (gh) {
     const parsed = parseGitHubLocation(gh)
@@ -153,6 +211,12 @@ export function locationFromParams(params: URLSearchParams): IndexLocation | nul
 /** The parameters that bring this index back, to keep the address bar honest. */
 export function paramsForLocation(location: IndexLocation): Record<string, string> {
   if (location.kind === 'local') return { repo: location.name }
+  if (location.kind === 'release') {
+    const params: Record<string, string> = { release: `${location.owner}/${location.repo}` }
+    if (location.tag !== DEFAULT_TAG) params.tag = location.tag
+    if (location.name !== location.repo) params.name = location.name
+    return params
+  }
   const params: Record<string, string> = { gh: `${location.owner}/${location.repo}` }
   // Only what differs from what `gh` alone would mean, so the common link stays
   // short enough to read.
@@ -268,6 +332,14 @@ function isLocation(value: unknown): value is IndexLocation {
       typeof candidate.owner === 'string' &&
       typeof candidate.repo === 'string' &&
       typeof candidate.branch === 'string' &&
+      typeof candidate.name === 'string'
+    )
+  }
+  if (candidate.kind === 'release') {
+    return (
+      typeof candidate.owner === 'string' &&
+      typeof candidate.repo === 'string' &&
+      typeof candidate.tag === 'string' &&
       typeof candidate.name === 'string'
     )
   }

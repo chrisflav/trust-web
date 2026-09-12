@@ -77,6 +77,35 @@ dependency graph.  A branch is anonymous, and it arrives with
 `Access-Control-Allow-Origin: *` and gzip — so the same reader that loads a
 local index loads a published one, lazy code shards and all.
 
+
+### Or to a release
+
+A library that would rather not carry its index in its own history publishes it
+with `publish: release` instead, and `?release=` reads it:
+
+```
+https://trust.example.org/?release=lana-agents/formal-schemes
+```
+
+This one is not free the way `?gh=` is.  Release assets are served without
+`Access-Control-Allow-Origin` and with `Content-Disposition: attachment`, so no
+browser can read them cross-origin however the fetch is written — they are
+readable here only because `docker/nginx.conf` proxies them onto this origin at
+`/release/`, following GitHub's redirect on the page's behalf and folding the
+flat asset name (`mylib--code--7.jsonl`) back into the path the loader expects
+(`mylib/code/7.jsonl`).
+
+So `?gh=` works in any copy of this frontend, including one opened from a file;
+`?release=` works only where this image, or an equivalent proxy, is in front.
+The dialog asks which of the two a repository uses, because nothing in
+`owner/repo` says so and guessing would mean a speculative request per
+keystroke.
+
+The proxy will fetch any public release asset from any public repository, which
+is what lets the picker read a library this deployment has never heard of, and
+also makes a deployment a download mirror for GitHub releases to anyone who
+points at it.  A deployment that does not want that can drop the three
+`/release/` blocks; `?gh=` keeps working.
 ## Marks
 
 Human judgements — trusted, characterized, protected — live in
