@@ -20,13 +20,13 @@ import {
  *
  * One build per worker: `StaticIndexSource.load` terminates it on the reply.
  */
-self.onmessage = async (event: MessageEvent<{ base: string }>) => {
+self.onmessage = async (event: MessageEvent<{ base: string; versioned?: boolean }>) => {
   const post = self as unknown as Worker
   const send = (message: WorkerMessage, transfer?: ArrayBuffer[]) =>
     transfer ? post.postMessage(message, transfer) : post.postMessage(message)
   try {
     const onProgress = (progress: LoadProgress) => send({ type: 'progress', progress })
-    const parts = await fetchIndexParts(event.data.base, onProgress)
+    const parts = await fetchIndexParts(event.data.base, onProgress, event.data.versioned === true)
     onProgress({ phase: 'build', loaded: 0, total: 0 })
     const payload = buildIndexPayload(
       parts.metaText,
@@ -35,7 +35,7 @@ self.onmessage = async (event: MessageEvent<{ base: string }>) => {
       parts.bodyPairs,
     )
     send(
-      { type: 'done', payload, hasCode: parts.meta.hasCode === true },
+      { type: 'done', payload, hasCode: parts.meta.hasCode === true, version: parts.version },
       payloadTransferables(payload),
     )
   } catch (error) {

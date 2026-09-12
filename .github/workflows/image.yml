@@ -88,6 +88,22 @@ jobs:
           grep -qi '^content-type: application/json' headers
           grep -qi '^content-encoding: gzip' headers
           echo "content-type and gzip confirmed"
+          # `/release/` reached GitHub and came back with GitHub's answer.
+          #
+          # A tag that does not exist, deliberately: what is under test is the
+          # route and the proxy, not a fixture release that would have to be
+          # kept alive for CI.  If the location did not match, this would be the
+          # SPA with a 200; if the resolver were missing or the redirect
+          # unfollowed, it would be a 502.  404 is GitHub saying "no such
+          # asset", which only GitHub can say.
+          code="$(curl -sS -o /dev/null -w '%{http_code}' \
+            http://127.0.0.1:8080/release/chrisflav/trust-action/no-such-tag/demo/meta.json)"
+          echo "/release/ with an absent tag: $code"
+          test "$code" = 404
+          # The resolver is written from the container's own resolv.conf before
+          # nginx starts; without it every /release/ request is a 502.
+          docker exec web test -s /etc/nginx/conf.d/00-resolver.conf
+          echo "release proxy confirmed"
           docker rm -f web
 
       - name: Publish

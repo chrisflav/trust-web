@@ -1727,6 +1727,38 @@ h1 {
   cursor: default;
 }
 
+/* Which of the two ways a repository publishes.  Reads as a caption rather than
+   a form control: it is a detail about the repository just typed, not a second
+   question of equal weight to it. */
+.index-published {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 10px 0 0;
+  padding: 0;
+  border: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.index-published legend {
+  padding: 0;
+  float: left;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.index-published label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.index-published input {
+  accent-color: var(--accent);
+}
+
 /* What this browser has read before.  Not a directory of what exists: nothing
    can produce one, which is why the field above is a field. */
 .index-recent {

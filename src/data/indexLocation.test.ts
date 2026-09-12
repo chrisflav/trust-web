@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   clearSessionLocation,
   DEFAULT_BRANCH,
+  DEFAULT_TAG,
   describeLocation,
   forgetLocation,
   indexBase,
+  indexRoot,
   locationFromParams,
   paramsForLocation,
   parseGitHubLocation,
@@ -218,5 +220,91 @@ describe('sameLocation', () => {
   it('compares what is actually fetched', () => {
     expect(sameLocation(FORMAL_SCHEMES, { ...FORMAL_SCHEMES })).toBe(true)
     expect(sameLocation(FORMAL_SCHEMES, { ...FORMAL_SCHEMES, branch: 'other' })).toBe(false)
+  })
+})
+
+describe('release-published indexes', () => {
+  const RELEASED: IndexLocation = {
+    kind: 'release',
+    owner: 'lana-agents',
+    repo: 'formal-schemes',
+    tag: DEFAULT_TAG,
+    name: 'formal-schemes',
+  }
+
+  it('reads a repository from ?release=', () => {
+    expect(locationFromParams(new URLSearchParams('release=lana-agents/formal-schemes'))).toEqual(
+      RELEASED,
+    )
+  })
+
+  it('takes the same spellings ?gh= does', () => {
+    for (const input of [
+      'https://github.com/lana-agents/formal-schemes',
+      'github.com/lana-agents/formal-schemes',
+      'lana-agents/formal-schemes.git',
+    ]) {
+      expect(locationFromParams(new URLSearchParams(`release=${input}`)), input).toEqual(RELEASED)
+    }
+  })
+
+  it('reads a tag and a name when the URL names them', () => {
+    expect(
+      locationFromParams(
+        new URLSearchParams('release=lana-agents/formal-schemes&tag=nightly&name=schemes'),
+      ),
+    ).toEqual({ ...RELEASED, tag: 'nightly', name: 'schemes' })
+  })
+
+  // The proxy is what makes these readable at all, so the path has to be the
+  // one `docker/nginx.conf` matches: owner, repository, tag, then the index.
+  it('addresses parts through the deployment proxy', () => {
+    expect(indexRoot(RELEASED)).toBe('/release/lana-agents/formal-schemes/trust-index')
+    expect(indexBase(RELEASED)).toBe('/release/lana-agents/formal-schemes/trust-index/formal-schemes')
+  })
+
+  it('round-trips through the address bar', () => {
+    expect(paramsForLocation(RELEASED)).toEqual({ release: 'lana-agents/formal-schemes' })
+    expect(locationFromParams(new URLSearchParams(paramsForLocation(RELEASED)))).toEqual(RELEASED)
+
+    const odd: IndexLocation = { ...RELEASED, tag: 'nightly', name: 'schemes' }
+    expect(paramsForLocation(odd)).toEqual({
+      release: 'lana-agents/formal-schemes',
+      tag: 'nightly',
+      name: 'schemes',
+    })
+    expect(locationFromParams(new URLSearchParams(paramsForLocation(odd)))).toEqual(odd)
+  })
+
+  // Same repository, two ways of publishing it: these are not the same index
+  // and must not collapse into one entry in the picker's history.
+  it('is not the same location as the branch of the same repository', () => {
+    expect(sameLocation(RELEASED, FORMAL_SCHEMES)).toBe(false)
+  })
+
+  it('says which repository it is, and links to it', () => {
+    expect(describeLocation(RELEASED)).toBe('lana-agents/formal-schemes')
+  })
+
+  // Read back through `isLocation`, which has to admit the new kind or the
+  // picker quietly drops every release it was asked to remember.
+  describe('in the recent list', () => {
+    const store = new Map<string, string>()
+
+    beforeEach(() => {
+      store.clear()
+      ;(globalThis as { localStorage?: unknown }).localStorage = {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, value),
+        removeItem: (key: string) => void store.delete(key),
+      }
+    })
+
+    it('survives a round trip', () => {
+      rememberLocation(RELEASED)
+      expect(recentLocations()).toContainEqual(RELEASED)
+      forgetLocation(RELEASED)
+      expect(recentLocations()).not.toContainEqual(RELEASED)
+    })
   })
 })
