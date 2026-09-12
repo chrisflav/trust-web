@@ -225,6 +225,40 @@ export function paramsForLocation(location: IndexLocation): Record<string, strin
   return params
 }
 
+
+/**
+ * The same repository, read the other way.
+ *
+ * Which of the two a repository uses is not visible from outside — both are
+ * "owner/repo" and nothing in the name says where the bytes are — so a reader
+ * who guesses wrong gets a missing index rather than a wrong answer.  These
+ * make the second guess one click instead of a re-typing, which is the whole of
+ * what the failure needs.
+ *
+ * The index name carries over: it is `--repo` at export time, not a property of
+ * where the export was put.
+ */
+export function asRelease(location: IndexLocation): IndexLocation {
+  if (location.kind !== 'github') return location
+  return {
+    kind: 'release',
+    owner: location.owner,
+    repo: location.repo,
+    tag: DEFAULT_TAG,
+    name: location.name,
+  }
+}
+
+export function asBranch(location: IndexLocation): IndexLocation {
+  if (location.kind !== 'release') return location
+  return {
+    kind: 'github',
+    owner: location.owner,
+    repo: location.repo,
+    branch: DEFAULT_BRANCH,
+    name: location.name,
+  }
+}
 /** Whether two locations name the same index. */
 export function sameLocation(a: IndexLocation, b: IndexLocation): boolean {
   return indexBase(a) === indexBase(b)

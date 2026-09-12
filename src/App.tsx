@@ -14,6 +14,8 @@ import { FollowPanel } from './components/FollowPanel'
 import { ServerPicker } from './components/ServerPicker'
 import { IndexDialog, IndexPicker } from './components/IndexPicker'
 import {
+  asBranch,
+  asRelease,
   indexBase,
   indexRoot,
   locationFromParams,
@@ -421,7 +423,30 @@ export function App() {
           <p>
             {LOCATION.owner}/{LOCATION.repo} does not appear to publish one on its{' '}
             <code>{LOCATION.branch}</code> branch. A repository publishes an index by running{' '}
-            <code>chrisflav/trust-action</code> in its CI.
+            <code>chrisflav/trust-action</code> in its CI — which can publish to a release
+            instead, in which case{' '}
+            <a href={`?${new URLSearchParams(paramsForLocation(asRelease(LOCATION)))}`}>
+              read it as a release
+            </a>
+            .
+          </p>
+        ) : LOCATION.kind === 'release' ? (
+          <p>
+            {LOCATION.owner}/{LOCATION.repo} does not appear to publish one to a{' '}
+            <code>{LOCATION.tag}</code> release. A repository publishes an index by running{' '}
+            <code>chrisflav/trust-action</code> in its CI — which can publish to a branch
+            instead, in which case{' '}
+            <a href={`?${new URLSearchParams(paramsForLocation(asBranch(LOCATION)))}`}>
+              read it as a branch
+            </a>
+            .
+            {/*
+              A deployment with no `/release/` proxy answers these with the SPA, so the
+              failure looks like a missing index rather than a missing proxy.  Saying so
+              here is cheaper than the reader working it out from a JSON parse error.
+            */}{' '}
+            A release is also only readable through a deployment that proxies release
+            assets; a bare static copy of this frontend cannot fetch them at all.
           </p>
         ) : (
           <p>
