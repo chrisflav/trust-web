@@ -81,9 +81,13 @@ interface IndexDialogProps {
 export function IndexDialog({ current, onClose }: IndexDialogProps) {
   const ref = useRef<HTMLDialogElement>(null)
   const [value, setValue] = useState('')
-  // Branch first because it is what every published index used before releases
-  // were an option, and because it is the one that needs no proxy.
-  const [publishedAs, setPublishedAs] = useState<PublishedAs>('branch')
+  // Starts at whatever is being read, so that changing library within a
+  // deployment that reads releases does not mean re-answering this every time.
+  // Branch otherwise: it is what every published index used before releases were
+  // an option, and the one that needs no proxy.
+  const [publishedAs, setPublishedAs] = useState<PublishedAs>(
+    current?.kind === 'release' ? 'release' : 'branch',
+  )
   const [recent, setRecent] = useState<IndexLocation[]>(recentLocations)
 
   // `showModal` rather than the `open` attribute: it is what gives the backdrop,

@@ -1148,8 +1148,7 @@ export class StaticIndexSource implements GraphSource {
       if (this.codeShards.size >= 4) {
         this.codeShards.delete(this.codeShards.keys().next().value!)
       }
-      const base = this.codeBase
-      pending = fetch(partUrl(base!, `code/${shard}.jsonl`, this.codeVersion))
+      pending = fetch(partUrl(this.codeBase, `code/${shard}.jsonl`, this.codeVersion))
         .then((response) => (response.ok ? response.text() : ''))
         .then((text) => {
           const entries = new Map<NodeId, DeclCode>()
