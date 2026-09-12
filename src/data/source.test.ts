@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   StaticIndexSource,
   closure,
+  beginReachableDepth,
   closureSize,
   fetchIndexParts,
   repoOfModule,
@@ -650,5 +651,53 @@ describe('version-pinned parts', () => {
     })
     const parts = await fetchIndexParts('/release/o/r/trust-index/test', undefined, true)
     expect(parts.version).toBe('12-34')
+  })
+})
+
+/**
+ * The depth control used to stop at 8, which is a number rather than a fact.
+ * These pin down the fact it stops at now.
+ *
+ * The fixture is 0 → {1,2} → 3, so the closure of 0 is two levels deep however
+ * much further it is asked to walk.
+ */
+describe('how deep a closure goes', () => {
+  const source = StaticIndexSource.fromText(meta, decls, edges)
+
+  it('reports where the walk actually ended, not where it was allowed to', () => {
+    expect(closureSize(source, 0, 5).depth).toBe(2)
+    expect(closureSize(source, 0, 99).depth).toBe(2)
+  })
+
+  it('reports the bound when the bound is what stopped it', () => {
+    expect(closureSize(source, 0, 1).depth).toBe(1)
+  })
+
+  it('is zero for a declaration that depends on nothing', () => {
+    expect(closureSize(source, 3, 5).depth).toBe(0)
+  })
+
+  it('answers unbounded, which is what the control needs', () => {
+    const begun = beginReachableDepth(source, 0, 'dependencies')
+    expect(begun.done).toBe(true)
+    if (begun.done) {
+      expect(begun.size.depth).toBe(2)
+      expect(begun.size.complete).toBe(true)
+    }
+  })
+
+  it('counts the other direction separately', () => {
+    // 3 is reached from 0 through either 1 or 2, so upwards it is also 2 deep.
+    const begun = beginReachableDepth(source, 3, 'dependents')
+    expect(begun.done).toBe(true)
+    if (begun.done) expect(begun.size.depth).toBe(2)
+  })
+
+  // A closure too large to walk within the budget reports what it reached, and
+  // says so — the caller treats that as a floor and leaves the control open.
+  it('is a floor rather than an answer when the work budget stops it', () => {
+    const size = closureSize(source, 0, 99, 'dependencies', 1)
+    expect(size.complete).toBe(false)
+    expect(size.depth).toBeLessThanOrEqual(2)
   })
 })

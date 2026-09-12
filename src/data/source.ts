@@ -1241,6 +1241,15 @@ export interface ClosureSize {
   edges: number
   /** False when the walk hit `maxWork`, making the counts lower bounds. */
   complete: boolean
+  /**
+   * How many levels actually held anything: the distance to the furthest
+   * declaration reached, which is 0 for a root with no neighbours.
+   *
+   * Bounded by the `maxDepth` the walk was given, so it answers "how deep did
+   * this go" rather than "how deep does it go" unless the walk was unbounded —
+   * which is what `beginReachableDepth` is for.
+   */
+  depth: number
 }
 
 /**
@@ -1271,6 +1280,7 @@ function* closureCounter(
   let edges = 0
   let complete = true
   let sinceYield = 0
+  let reached = 0
   let frontier: NodeId[] = [root]
 
   outer: for (let depth = 0; depth < maxDepth && frontier.length > 0; depth++) {
@@ -1298,9 +1308,12 @@ function* closureCounter(
         yield
       }
     }
+    // A level that found nothing new is where the closure ended, so the depth
+    // worth reporting is the last one that did.
+    if (next.length > 0) reached = depth + 1
     frontier = next
   }
-  return { nodes: seen.size, edges, complete }
+  return { nodes: seen.size, edges, complete, depth: reached }
 }
 
 export function closureSize(
@@ -1368,6 +1381,33 @@ export function beginClosureSize(
   }
 }
 
+
+/**
+ * How deep the closure actually goes, so that a depth control can stop where
+ * the graph does.
+ *
+ * The expanded view used to cap depth at 8, which is a number and not a fact:
+ * for most declarations it is far past the end — raising it changes nothing
+ * because the frontier emptied at 4 — and for the ones that matter it is a
+ * ceiling in the way, hiding the part of the closure the reader opened the view
+ * to see.  Asking the graph is cheap enough to be worth doing.
+ *
+ * Unbounded in depth and bounded in work, like the counter it delegates to.  A
+ * root whose closure exceeds `maxWork` answers `complete: false`, and the
+ * caller should treat the depth as a floor rather than the answer: it is what
+ * was reached before the budget ran out, which is still a better ceiling than a
+ * constant.
+ */
+export function beginReachableDepth(
+  source: GraphSource,
+  root: NodeId,
+  direction: 'dependencies' | 'dependents',
+  maxWork = 25_000_000,
+):
+  | { done: true; size: ClosureSize }
+  | { done: false; rest: (cancelled: () => boolean) => Promise<ClosureSize | null> } {
+  return beginClosureSize(source, root, Number.POSITIVE_INFINITY, direction, maxWork)
+}
 /**
  * Breadth-first expansion of the definitional closure, bounded by depth.
  *

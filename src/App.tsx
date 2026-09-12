@@ -13,6 +13,9 @@ import { WhoTrusts } from './components/WhoTrusts'
 import { FollowPanel } from './components/FollowPanel'
 import { ServerPicker } from './components/ServerPicker'
 import { IndexDialog, IndexPicker } from './components/IndexPicker'
+import { EXPANDED_OPTIONS, type GraphOptions } from './components/GraphView'
+import { beginReachableDepth } from './data/source'
+import { graphOptionsFromParams, paramsForView, reposFromParams } from './data/viewParams'
 import {
   asBranch,
   asRelease,
@@ -53,6 +56,17 @@ const LOCATION = locationFromParams(params) ?? sessionLocation()
 const INITIAL_DECL = params.get('decl') ?? 'Nat.gcd'
 const INITIAL_DIRECTION: Direction = params.get('dir') === 'dependents' ? 'dependents' : 'dependencies'
 const INITIAL_DEPTH = Number(params.get('depth') ?? 2)
+const INITIAL_REPOS = reposFromParams(params)
+const INITIAL_GRAPH_OPTIONS = graphOptionsFromParams(params, EXPANDED_OPTIONS)
+
+/**
+ * What the depth controls allow before the real answer arrives.
+ *
+ * The fixed maximum they both used to have, kept for the moment between opening
+ * a declaration and its closure being counted — long enough to matter on a
+ * Mathlib-sized one, and a number the reader could already reach.
+ */
+const PROVISIONAL_DEPTH = 8
 
 /** How many previous positions the back button can walk through. */
 const HISTORY_LIMIT = 200
@@ -90,7 +104,39 @@ export function App() {
   const [expanded, setExpanded] = useState(params.get('graph') === 'expanded')
   const [direction, setDirection] = useState<Direction>(INITIAL_DIRECTION)
   const [depth, setDepth] = useState(INITIAL_DEPTH)
-  const [repoFilter, setRepoFilter] = useState<Set<string>>(new Set())
+  const [repoFilter, setRepoFilter] = useState<Set<string>>(INITIAL_REPOS)
+  const [graphOptions, setGraphOptions] = useState<GraphOptions>(INITIAL_GRAPH_OPTIONS)
+
+  // How deep this declaration actually goes, which is what both depth controls
+  // stop at — the inline one and the expanded view's, which share `depth` and
+  // must therefore share a ceiling or disagree about what the value means.
+  //
+  // Counted off the unfiltered source on purpose: the filters hide parts of the
+  // graph, and a ceiling that moved when a repository was unticked would read
+  // as the control breaking rather than as the view changing.  A large closure
+  // resolves in slices, so until it lands the ceiling is the old fixed 8.
+  const [reach, setReach] = useState<{ depth: number; complete: boolean } | null>(null)
+  useEffect(() => {
+    if (!source || root === null) return
+    setReach(null)
+    const begun = beginReachableDepth(source, root, direction)
+    if (begun.done) {
+      setReach({ depth: begun.size.depth, complete: begun.size.complete })
+      return
+    }
+    let cancelled = false
+    begun.rest(() => cancelled).then((size) => {
+      if (!cancelled && size) setReach({ depth: size.depth, complete: size.complete })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [source, root, direction])
+
+  // Never below where the control already is: a link shared at depth 12 must
+  // not be clamped to 4 by a count that has not finished, or by one that
+  // stopped at its work budget.
+  const maxDepth = Math.max(1, depth, reach?.depth ?? PROVISIONAL_DEPTH)
   const [code, setCode] = useState<DeclCode | null>(null)
   const [progress, setProgress] = useState<LoadProgress | null>(null)
   const [marks, setMarks] = useState<MarksIndex>(() => indexMarks(emptyMarks, false))
@@ -175,15 +221,20 @@ export function App() {
     if (!source || root === null || !LOCATION) return
     // The index is carried through so that a reload, or a shared link, stays on
     // the one the view is actually showing.
-    const next = new URLSearchParams({
-      ...paramsForLocation(LOCATION),
-      decl: source.node(root).name,
-      dir: direction,
-      depth: String(depth),
-    })
-    if (expanded) next.set('graph', 'expanded')
+    const next = paramsForView(
+      paramsForLocation(LOCATION),
+      {
+        decl: source.node(root).name,
+        direction,
+        depth,
+        expanded,
+        repos: repoFilter,
+        options: graphOptions,
+      },
+      EXPANDED_OPTIONS,
+    )
     window.history.replaceState(null, '', `?${next}`)
-  }, [source, root, direction, depth, expanded])
+  }, [source, root, direction, depth, expanded, repoFilter, graphOptions])
 
   // Code shards are fetched lazily, so a stale response must not overwrite a
   // newer selection.
@@ -526,6 +577,10 @@ export function App() {
         onRepoFilter={setRepoFilter}
         hidden={hidden}
         onHiddenChange={updateHidden}
+        initialOptions={graphOptions}
+        onOptions={setGraphOptions}
+        maxDepth={maxDepth}
+        reach={reach}
         onClose={() => setExpanded(false)}
       />
     )
@@ -710,7 +765,7 @@ export function App() {
                   <input
                     type="range"
                     min={1}
-                    max={8}
+                    max={maxDepth}
                     value={depth}
                     onChange={(e) => setDepth(Number(e.target.value))}
                   />
