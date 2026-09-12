@@ -30,6 +30,18 @@ interface ExpandedGraphProps {
   onRepoFilter: (next: Set<string>) => void
   hidden: HiddenConfig
   onHiddenChange: (next: HiddenConfig) => void
+  /**
+   * Where the node and edge budgets start, and where they go when changed.
+   *
+   * Held by the caller rather than here so that they can be in the address bar:
+   * a graph is worth sharing at the limits it was read at, and `nodes=2000`
+   * is the difference between the picture in the link and a truncated one.
+   */
+  initialOptions: GraphOptions
+  onOptions: (options: GraphOptions) => void
+  /** The deepest the closure goes, and whether that is the answer or a floor. */
+  maxDepth: number
+  reach: { depth: number; complete: boolean } | null
   onClose: () => void
 }
 
@@ -100,10 +112,15 @@ export function ExpandedGraph({
   onRepoFilter,
   hidden,
   onHiddenChange,
+  initialOptions,
+  onOptions,
+  maxDepth,
+  reach,
   onClose,
 }: ExpandedGraphProps) {
-  const [options, setOptions] = useState<GraphOptions>(EXPANDED_OPTIONS)
+  const [options, setOptions] = useState<GraphOptions>(initialOptions)
   const [zoom, setZoom] = useState(1)
+
   // The caption sits under a canvas that is usually scrolled well out of view,
   // so the counts are repeated up here where the controls that change them are.
   const [stats, setStats] = useState<{
@@ -118,7 +135,11 @@ export function ExpandedGraph({
     [],
   )
   const set = <K extends keyof GraphOptions>(key: K, value: GraphOptions[K]) =>
-    setOptions((current) => ({ ...current, [key]: value }))
+    setOptions((current) => {
+      const next = { ...current, [key]: value }
+      onOptions(next)
+      return next
+    })
 
   // Escape closes, so leaving never needs the mouse to find a button.
   useEffect(() => {
@@ -193,7 +214,18 @@ export function ExpandedGraph({
             </button>
           </div>
 
-          <Slider label="depth" value={depth} min={1} max={8} onChange={onDepth} />
+          <Slider
+            label="depth"
+            value={depth}
+            min={1}
+            max={maxDepth}
+            // A closure that ended at 4 has nothing past 4, and a slider that
+            // still moves there invites the reader to look for something that
+            // is not missing.  When the count stopped at its work budget the
+            // ceiling is a floor instead, so the slider keeps going.
+            format={(v) => (reach?.complete && v >= reach.depth ? `${v} (all)` : String(v))}
+            onChange={onDepth}
+          />
           <Slider
             label="nodes"
             value={options.maxNodes}
