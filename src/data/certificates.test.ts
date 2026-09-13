@@ -363,13 +363,15 @@ describe('whoTrusts and whoAmI', () => {
     expect(await whoTrusts('a1', 'semantic-v1')).toMatchObject({ reached: false, certificates: [] })
   })
 
-  it('asks the node to reach its peers only when asked to', async () => {
+  // §7: a node answers from its own store unless `?depth=` sends it further,
+  // and this is asked for every declaration a reader lingers on, which is not
+  // the place to spend a fan-out.
+  it('asks this node, and does not send it to its peers', async () => {
     const local = node({ certificates: [] })
     await whoTrusts('a1', 'semantic-v1')
-    expect(String(local.mock.calls[0]?.[0])).not.toContain('depth=')
-    const deep = node({ certificates: [] })
-    await whoTrusts('a1', 'semantic-v1', 1)
-    expect(String(deep.mock.calls[0]?.[0])).toContain('depth=1')
+    const asked = String(local.mock.calls[0]?.[0])
+    expect(asked).toContain('hash=a1')
+    expect(asked).not.toContain('depth=')
   })
 
   it('tells a signed-out reader from a node that is not there', async () => {

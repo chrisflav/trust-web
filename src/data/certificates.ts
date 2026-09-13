@@ -303,19 +303,22 @@ async function call<T>(path: string, init?: RequestInit): Promise<T | null> {
 }
 
 /**
- * Who vouches for this content, on this node and — if asked — beyond it.
+ * Who vouches for this content, as this node has it.
  *
  * One question, one answer, with each certificate labelled by where it came
- * from.  `depth` is what decides whether "beyond it" happens at all: §7 has the
- * node answer from its own store and its cache unless a depth is asked for, so
- * a call that leaves it at zero is a local lookup, `truncated` is always false
- * and a certificate held only by a peer this node has not imported does not
- * appear.  That is the right trade where the question is asked automatically on
- * every declaration, and the wrong one where a reader asked it deliberately.
+ * from — and no session anywhere in it: certificates are public, so this is
+ * the same answer for a reader in a private window as for the person who
+ * published them.
+ *
+ * This node, deliberately.  §7 has a node answer from its own store and from
+ * what peers have already sent it unless `?depth=` asks it to go further, and
+ * this question is asked for every declaration a reader opens or lingers on,
+ * which is not the place to spend a fan-out.  So a certificate held only by a
+ * peer this node has never heard from does not appear here, and `truncated` is
+ * accordingly always false.
  */
-export async function whoTrusts(hash: string, hasher: string, depth = 0): Promise<Answer> {
+export async function whoTrusts(hash: string, hasher: string): Promise<Answer> {
   const query = new URLSearchParams({ hash, hasher })
-  if (depth > 0) query.set('depth', String(depth))
   const result = await call<Answer>(`/api/certificates?${query}`)
   // A node that did not answer is not a node that said "nobody".
   if (result === null) return { certificates: [], truncated: false, askedPeers: 0, reached: false }

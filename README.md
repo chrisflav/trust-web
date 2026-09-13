@@ -131,12 +131,16 @@ That list is what counts *for you*, and it says so.  It comes from your trust
 list, which is a question about a signed-in account: a reader in a private
 window has none of it, and a signed-in one is told nothing about people they do
 not follow.  So the card never reports that nobody vouched — it cannot know
-that — and `who vouches?` beside it asks the node the question it can answer,
-which is who has published a certificate for this content at all.  Anybody may
-ask that, signed in or not.  It is a button rather than something every hover
-does because it is a request per declaration, and because asking deliberately
-earns a `depth`, which lets the node ask its peers as well; the panel on the
-declaration itself runs on every declaration opened, so that one stays local.
+that — and underneath it says **who else vouched**, which is a question about
+the content and not about the reader, so it has an answer for everybody.
+Certificates are public: the same names appear in a private window as in the
+one that published them.
+
+That second list is fetched, not asked for.  A pointer merely crossing a node
+asks nothing — the request waits a moment to see whether the reader stays — and
+an answer is remembered for the session, so re-reading a graph costs nothing.
+It is what this node holds, including what its peers have already sent it,
+which is the same question `Who trusts this` asks on the declaration itself.
 
 The same card records a judgement: `mark trusted` writes to the marks file
 where that is editable, and `trust this` publishes an unsigned certificate
