@@ -28,13 +28,19 @@ import {
   setSessionLocation,
 } from './data/indexLocation'
 import {
+  claimFor,
   currentIdentity,
   hasServer,
+  publish,
+  revoke,
   trustList,
-  trustedHashes,
+  trustedVouches,
   type FollowedKey,
   type Identity,
+  type Vouch,
 } from './data/certificates'
+import { closeIsBack, navState, nextNav, readNav, sameEntry, type NavState } from './data/navigation'
+import type { PreviewTrust, TrustedBy } from './components/NodePreview'
 import { defaultHidden, loadHidden, saveHidden, type HiddenConfig } from './data/hidden'
 
 /** Initial view state, so that a particular declaration can be linked to. */
@@ -68,9 +74,6 @@ const INITIAL_GRAPH_OPTIONS = graphOptionsFromParams(params, EXPANDED_OPTIONS)
  */
 const PROVISIONAL_DEPTH = 8
 
-/** How many previous positions the back button can walk through. */
-const HISTORY_LIMIT = 200
-
 /** Byte counts, at the resolution a progress line can usefully show. */
 function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} kB`
@@ -92,8 +95,16 @@ export function App() {
    * response to picking a node, so it only follows a pick.
    */
   const [picked, setPicked] = useState(false)
-  /** Roots visited before this one, most recent last. */
-  const [past, setPast] = useState<NodeId[]>([])
+  /**
+   * Where the browser thinks we are, mirrored so the back button can render.
+   *
+   * The stack itself is the browser's — see `data/navigation` — and this is
+   * only the entry it is currently on, kept in state because whether the button
+   * is disabled and where it says it goes are read off it.
+   */
+  const [nav, setNav] = useState<NavState | null>(() =>
+    typeof window === 'undefined' ? null : readNav(window.history.state),
+  )
   /**
    * On by default: the question `trust` exists to answer is what a statement
    * still rests on that you have *not* accepted, so tracing past your own
@@ -149,8 +160,8 @@ export function App() {
   const [following, setFollowing] = useState<Set<string>>(new Set())
   /** Keys you follow — the half of a trust list that survives federation. */
   const [followingKeys, setFollowingKeys] = useState<FollowedKey[]>([])
-  /** Hashes vouched for by the people you follow. */
-  const [federated, setFederated] = useState<Set<string>>(new Set())
+  /** What you trust by certificate, and who vouched for each: yours included. */
+  const [federated, setFederated] = useState<Map<string, Vouch[]>>(new Map())
   /** The trust list, shown on demand rather than taking up the header. */
   const [showFollows, setShowFollows] = useState(false)
 
@@ -200,12 +211,12 @@ export function App() {
     if (!me) {
       setFollowing(new Set())
       setFollowingKeys([])
-      setFederated(new Set())
+      setFederated(new Map())
       return
     }
     const [list, hashes] = await Promise.all([
       trustList(),
-      trustedHashes(source?.meta().hasher ?? 'semantic-v1'),
+      trustedVouches(source?.meta().hasher ?? 'semantic-v1'),
     ])
     setFollowing(new Set(list.people.map((entry) => entry.login)))
     setFollowingKeys(list.keys)
@@ -216,7 +227,16 @@ export function App() {
     void refreshFederation()
   }, [refreshFederation])
 
-  // Keep the address bar in step with the view, without adding history entries.
+  /**
+   * Keep the address bar in step with the view, and the history with the reader.
+   *
+   * One place owns both, because they are one question: a change that takes the
+   * reader somewhere else — another declaration, or into the full-screen graph —
+   * is a history entry, and a change to how the same thing is being looked at
+   * amends the entry they are on.  Doing it here rather than at each button
+   * means nothing can navigate without the browser hearing about it, which is
+   * what made the browser's back button disagree with ours in the first place.
+   */
   useEffect(() => {
     if (!source || root === null || !LOCATION) return
     // The index is carried through so that a reload, or a shared link, stays on
@@ -233,8 +253,51 @@ export function App() {
       },
       EXPANDED_OPTIONS,
     )
-    window.history.replaceState(null, '', `?${next}`)
+    const entry = { decl: source.node(root).name, expanded }
+    const current = readNav(window.history.state)
+    let state: NavState
+    if (current === null || sameEntry(current, entry)) {
+      // The first view of a page is where the reader already is, not somewhere
+      // they went: pushing it would leave an entry behind us whose back button
+      // goes to this same page before it had loaded anything.
+      state = current ?? nextNav(null, entry)
+      window.history.replaceState(navState(state), '', `?${next}`)
+    } else {
+      state = nextNav(current, entry)
+      window.history.pushState(navState(state), '', `?${next}`)
+    }
+    setNav((previous) =>
+      previous && previous.seq === state.seq && sameEntry(previous, state) ? previous : state,
+    )
   }, [source, root, direction, depth, expanded, repoFilter, graphOptions])
+
+  /**
+   * The browser's back and forward buttons, which are now ours.
+   *
+   * Only the position is restored — the declaration, and whether the graph is
+   * full screen.  The settings stay as they are, and the effect above writes
+   * them straight back into the entry we landed on, so going back never quietly
+   * moves a slider the reader has since set.
+   */
+  useEffect(() => {
+    if (!source) return
+    const onPop = (event: PopStateEvent) => {
+      const state = readNav(event.state)
+      if (!state) return
+      // Resolved before anything moves: an entry naming a declaration this
+      // index does not have is not half-applied, or the view and the history
+      // would disagree about where the reader is.
+      const id = source.findByName(state.decl)
+      if (id === null) return
+      setNav(state)
+      setExpanded(state.expanded)
+      setRoot(id)
+      setSelected(id)
+      setPicked(false)
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [source])
 
   // Code shards are fetched lazily, so a stale response must not overwrite a
   // newer selection.
@@ -297,11 +360,11 @@ export function App() {
   }, [source, repoFilter, hidden.active, hiddenNames])
 
   /**
-   * Trusted here, or vouched for by somebody you follow.
+   * Trusted here, or vouched for by a certificate you count — yours included.
    *
-   * Federated trust widens exactly this predicate and nothing else — the cut,
-   * the green background and "up to trusted" mode all read from it, so a
-   * certificate from someone you follow behaves like a mark you made yourself.
+   * Certificates widen exactly this predicate and nothing else — the cut, the
+   * green background and "up to trusted" mode all read from it, so one from
+   * somebody you follow behaves like a mark you made yourself.
    */
   const isTrusted = useCallback(
     (id: NodeId) => {
@@ -346,32 +409,26 @@ export function App() {
   // Stable identities: these are props of memoised components, so recreating
   // them on every render would defeat the memoisation entirely.
   /**
-   * Make `id` the root, remembering where we were so `back` can return.
+   * Make `id` the root.
    *
-   * The push is a plain call rather than nested inside a `setRoot` updater:
-   * `StrictMode` invokes updaters twice, which would record every position
-   * twice over.
+   * Nothing is recorded here: the effect that owns the address bar sees the
+   * root change and pushes the entry, which is why this takes no note of where
+   * we were and why `StrictMode` running it twice costs nothing.
    */
-  const focus = useCallback(
-    (id: NodeId) => {
-      if (root !== null && root !== id) {
-        setPast((stack) => [...stack, root].slice(-HISTORY_LIMIT))
-      }
-      setRoot(id)
-      setSelected(id)
-      setPicked(false)
-    },
-    [root],
-  )
-
-  const back = useCallback(() => {
-    if (past.length === 0) return
-    const previous = past[past.length - 1]
-    setPast(past.slice(0, -1))
-    setRoot(previous)
-    setSelected(previous)
+  const focus = useCallback((id: NodeId) => {
+    setRoot(id)
+    setSelected(id)
     setPicked(false)
-  }, [past])
+  }, [])
+
+  /**
+   * Back, in the only sense the browser has.
+   *
+   * The button no longer walks a stack of its own — it presses the browser's
+   * back button, which fires `popstate` and lands in the handler above, so that
+   * this button and the one in the chrome cannot come to mean different things.
+   */
+  const back = useCallback(() => window.history.back(), [])
 
   const focusName = useCallback(
     (name: string) => {
@@ -451,6 +508,72 @@ export function App() {
       setMarks(indexMarks(next, true))
     },
     [marks, source],
+  )
+
+  /**
+   * Who trusts a declaration, and on what basis.
+   *
+   * Both halves of the answer the views already act on: the mark recorded in
+   * this index's marks file, and the certificates counted for it.  Nothing is
+   * fetched — the certificates were all read in one request when the trust list
+   * was — so a card can name them while the pointer is passing over a node.
+   */
+  const trustedBy = useCallback(
+    (id: NodeId): TrustedBy => {
+      if (!source) return { vouches: [] }
+      const decl = source.node(id)
+      const hash = source.hashOf(id)
+      return {
+        mark: decl ? marks.trusted.get(decl.name) : undefined,
+        vouches: (hash.length > 0 ? federated.get(hash) : undefined) ?? [],
+      }
+    },
+    [source, marks, federated],
+  )
+
+  /** Record or remove a mark, from wherever a declaration is on screen. */
+  const markTrusted = useCallback(
+    async (name: string, trusted: boolean) => {
+      await editMarks(trusted ? { kind: 'trust', name, note: '' } : { kind: 'untrust', name })
+    },
+    [editMarks],
+  )
+
+  /**
+   * Publish or withdraw a certificate for a declaration's content.
+   *
+   * Unsigned and unannotated, which is what a judgement made in passing over a
+   * graph can honestly be; `WhoTrusts` is where a note and a signature belong,
+   * and it is one double-click away.  The refresh afterwards is what turns the
+   * node green, since the trusted set is the thing the views read.
+   */
+  const vouchFor = useCallback(
+    async (id: NodeId, vouch: boolean) => {
+      if (!source) return
+      const hash = source.hashOf(id)
+      if (hash.length === 0) return
+      const done = vouch
+        ? (await publish(claimFor({ name: source.node(id).name, hash }, source.meta()))) !== null
+        : await revoke(hash)
+      if (!done) throw new Error('the certificate server did not accept that — still signed in?')
+      await refreshFederation()
+    },
+    [source, refreshFederation],
+  )
+
+  /**
+   * What the graphs' hover cards may say and do.
+   *
+   * Assembled once, because it is a prop of a memoised component: a fresh
+   * object per render would re-render every node in the drawing.
+   */
+  const preview = useMemo<PreviewTrust>(
+    () => ({
+      trustedBy,
+      onMark: marks.editable ? markTrusted : undefined,
+      onVouch: identity ? vouchFor : undefined,
+    }),
+    [trustedBy, marks.editable, markTrusted, identity, vouchFor],
   )
 
   // Nothing has been picked: a first visit, or a session that has not chosen.
@@ -553,6 +676,20 @@ export function App() {
     setRepoFilter(next)
   }
 
+  /**
+   * Leave the expanded graph the way the reader arrived at it.
+   *
+   * Opening it was a step, so closing it is a step back and goes through the
+   * history — otherwise the browser would be left holding an entry for a view
+   * that is no longer on screen, and its back button would re-open the graph
+   * the reader had just closed.  Arriving on `?graph=expanded`, where there is
+   * no step to undo, closes it in place instead.
+   */
+  const closeExpanded = () => {
+    if (closeIsBack(nav)) window.history.back()
+    else setExpanded(false)
+  }
+
   if (expanded && rootDecl && root !== null) {
     return (
       <ExpandedGraph
@@ -572,6 +709,7 @@ export function App() {
         isHidden={isHidden}
         onHide={hide}
         onUnhide={unhide}
+        preview={preview}
         repos={source.repos()}
         repoFilter={repoFilter}
         onRepoFilter={setRepoFilter}
@@ -581,7 +719,7 @@ export function App() {
         onOptions={setGraphOptions}
         maxDepth={maxDepth}
         reach={reach}
-        onClose={() => setExpanded(false)}
+        onClose={closeExpanded}
       />
     )
   }
@@ -600,12 +738,12 @@ export function App() {
       <div className="controls">
         <button
           className="back"
-          disabled={past.length === 0}
+          disabled={!nav || nav.seq === 0}
           onClick={back}
           title={
-            past.length === 0
+            !nav || nav.seq === 0
               ? 'Nothing to go back to'
-              : `Back to ${source.node(past[past.length - 1])?.name ?? 'the previous declaration'}`
+              : `Back to ${nav.prev ?? 'the previous declaration'}`
           }
         >
           ← back
@@ -810,6 +948,7 @@ export function App() {
                     isHidden={isHidden}
                     onHide={hide}
                     onUnhide={unhide}
+                    preview={preview}
                   />
                 </section>
               </div>

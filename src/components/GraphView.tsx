@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import type { ClosureSize, GraphSource } from '../data/source'
 import { beginClosureSize, closure, filterSource, type Accept } from '../data/source'
-import { NodePreview } from './NodePreview'
+import { NodePreview, type PreviewTrust } from './NodePreview'
 import { GraphLegend } from './GraphLegend'
 import type { Graph, NodeId } from '../data/types'
 import type { Direction } from './DepsTree'
@@ -372,6 +372,8 @@ interface GraphViewProps {
   isHidden?: (id: NodeId) => boolean
   onHide?: (name: string) => void
   onUnhide?: (name: string) => void
+  /** What the hover card may say and do about trust; absent leaves it a preview. */
+  preview?: PreviewTrust
   /** Report the counts, for a caller that shows them in its own bar. */
   onStats?: (stats: { total: ClosureSize | null; nodes: number; edges: number; truncated: boolean }) => void
   /** How to draw it; defaults to what the side pane wants. */
@@ -401,11 +403,20 @@ export function GraphView({
   isHidden,
   onHide,
   onUnhide,
+  preview,
   onStats,
   options = PANE_OPTIONS,
   fit = true,
 }: GraphViewProps) {
   const [hover, setHover] = useState<{ id: NodeId; x: number; y: number } | null>(null)
+  /**
+   * Whether the hover card shows bodies as well as signatures.
+   *
+   * Kept here rather than in the card, which is torn down every time the
+   * pointer leaves a node: asking for definitions is a way of reading the
+   * graph, not a thing you say about one declaration.
+   */
+  const [showValue, setShowValue] = useState(false)
   // Closing on `mouseleave` alone made the card unusable: reaching for the
   // button in it means leaving the node, which closed it before the click
   // landed.  Leaving only schedules the close, and the card cancels it.
@@ -635,6 +646,9 @@ export function GraphView({
           x={hover.x}
           y={hover.y}
           hidden={isHidden?.(hover.id) ?? false}
+          showValue={showValue}
+          onShowValue={setShowValue}
+          trust={preview}
           onPointerEnter={cancelClose}
           onPointerLeave={scheduleClose}
           onHide={(name) => {

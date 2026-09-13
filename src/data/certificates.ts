@@ -123,6 +123,32 @@ export interface Claim {
   note: string
 }
 
+/**
+ * The claim to publish about a declaration as this index has it.
+ *
+ * One builder, because a claim is only worth anything if everyone who makes one
+ * makes the same bytes: the signature covers these eight fields, and a second
+ * place that filled them in slightly differently would sign something nobody
+ * else could reproduce.  The seconds-resolution timestamp is part of that — the
+ * canonical form has no room for milliseconds.
+ */
+export function claimFor(
+  decl: { name: string; hash?: string },
+  meta: { repo: string; rev: string; toolchain: string; hasher?: string },
+  note = '',
+): Claim {
+  return {
+    decl: decl.name,
+    hash: decl.hash ?? '',
+    hasher: meta.hasher ?? 'semantic-v1',
+    repo: meta.repo,
+    commit: meta.rev,
+    toolchain: meta.toolchain,
+    asserted: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    note,
+  }
+}
+
 const CLAIM_FIELDS: (keyof Claim)[] = [
   'asserted', 'commit', 'decl', 'hash', 'hasher', 'note', 'repo', 'toolchain',
 ]
@@ -380,18 +406,99 @@ export async function unfollowIdentity(login: string): Promise<boolean> {
   return (await call(`/api/trust-list/${encodeURIComponent(login)}`, { method: 'DELETE' })) !== null
 }
 
+/** One person's judgement about one piece of content, as the trusted set has it. */
+export interface Vouch {
+  hash: string
+  /** The account that asserted it, as the node that holds the row has it. */
+  issuer: string
+  fingerprint: string
+  /** Issued on the node being read, rather than relayed to it (§4.4). */
+  local: boolean
+  /** Yours. */
+  mine: boolean
+  asserted: string
+}
+
 /**
- * Every hash the people you follow vouch for.
+ * Everything you trust, by hash, with who vouched for each.
  *
- * One flat set, which is all the views need: `trustedCutSource` already turns
- * "these declarations are trusted" into graph semantics, so federated trust
- * only has to widen the set rather than teach anything new.
+ * A map rather than a set, because a graph that colours a node green owes the
+ * reader the next question: green *according to whom*.  The rows come back from
+ * the one request that was already being made, so naming the people costs
+ * nothing over knowing that somebody exists — and the alternative, asking per
+ * declaration, would be one federated query per node hovered.
+ *
+ * Membership is what the views mostly use: `trustedCutSource` already turns
+ * "these declarations are trusted" into graph semantics, so trust from a
+ * certificate only has to widen the set rather than teach anything new.
+ *
+ * Your own certificates are in here, which is a statement about the server: a
+ * node older than that fix answers with your trust list alone, and then a
+ * declaration you vouched for is trusted everywhere it is *said* and nowhere it
+ * is *drawn*.  Nothing here can repair that; it is noted so the symptom is
+ * recognisable.
  */
-export async function trustedHashes(hasher: string): Promise<Set<string>> {
-  const result = await call<{ hashes: { hash: string }[] }>(
+export async function trustedVouches(hasher: string): Promise<Map<string, Vouch[]>> {
+  const result = await call<{ hashes: Partial<Vouch>[] }>(
     `/api/trusted?${new URLSearchParams({ hasher })}`,
   )
-  return new Set((result?.hashes ?? []).map((row) => row.hash))
+  const byHash = new Map<string, Vouch[]>()
+  for (const row of result?.hashes ?? []) {
+    if (typeof row?.hash !== 'string' || row.hash.length === 0) continue
+    const vouch: Vouch = {
+      hash: row.hash,
+      issuer: typeof row.issuer === 'string' ? row.issuer : '',
+      fingerprint: typeof row.fingerprint === 'string' ? row.fingerprint : '',
+      // Absent is the conservative answer for both: an older node sends neither,
+      // and a name shown as checked when nothing checked it is the one mistake
+      // worth designing against.
+      local: row.local === true,
+      mine: row.mine === true,
+      asserted: typeof row.asserted === 'string' ? row.asserted : '',
+    }
+    const existing = byHash.get(vouch.hash)
+    if (existing) existing.push(vouch)
+    else byHash.set(vouch.hash, [vouch])
+  }
+  return byHash
+}
+
+/**
+ * Whom to name for a vouch, and whether that name was checked.
+ *
+ * `issuerOf`'s sibling, for the rows the trusted set carries rather than whole
+ * certificates, and it answers the same way: never "unknown" while anything is
+ * known, and never a stranger's word in the same voice as a checked one.
+ */
+export function voucherOf(vouch: Vouch): Issuer {
+  const fingerprint = vouch.fingerprint ? vouch.fingerprint.slice(-16) : ''
+  if (vouch.mine) {
+    return { text: 'you', verified: true, why: 'You published a certificate for this content.' }
+  }
+  if (vouch.issuer && vouch.local) {
+    return {
+      text: vouch.issuer,
+      verified: true,
+      why: `${vouch.issuer} was signed in to this node when the certificate was made.`,
+    }
+  }
+  if (vouch.issuer) {
+    return {
+      text: vouch.issuer,
+      verified: false,
+      why:
+        `“${vouch.issuer}” is what another node says, and nothing here can check a name. ` +
+        'You count this certificate because you follow the key that signed it.',
+    }
+  }
+  if (fingerprint) {
+    return {
+      text: fingerprint,
+      verified: true,
+      why: 'No account name travelled with this entry; this is the last 16 of the key you follow.',
+    }
+  }
+  return { text: 'anonymous', verified: false, why: 'This entry names neither an account nor a key.' }
 }
 
 /**
