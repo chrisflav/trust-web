@@ -1044,6 +1044,10 @@ h1 {
   background: var(--panel);
   box-shadow: 0 10px 30px rgb(0 0 0 / 22%);
   pointer-events: auto;
+  /* It is given a height budget from where the pointer is, because it now holds
+     as much as a definition and a list of people; past that it scrolls rather
+     than running off the screen. */
+  overflow: auto;
 }
 
 .node-preview-name {
@@ -1081,6 +1085,63 @@ h1 {
   word-break: break-word;
 }
 
+/* The body, when it is asked for.  Marked off from the signature the way the
+   declaration pane does it, so the two read alike. */
+.node-preview-sep {
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  margin: 4px 0 2px;
+}
+
+/* A definition can be pages long, and the card is a card. */
+.node-preview-code.value {
+  max-height: 16em;
+}
+
+/* Green says a declaration is trusted; this says by whom, which is the question
+   a colour cannot answer and the expanded graph had nowhere else to put. */
+.node-preview-trust {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.node-preview-trust-label {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 9.5px;
+}
+
+.node-preview-trust-label.none {
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 11px;
+}
+
+.node-preview-voucher {
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--data);
+  color: var(--data);
+  font-weight: 600;
+}
+
+/* A name nothing here could check is not shown in the same voice as one this
+   node authenticated; the key is what carries the weight in that case. */
+.node-preview-voucher.unverified {
+  border-color: var(--border);
+  color: var(--muted);
+  font-weight: 400;
+  font-style: italic;
+}
+
 .node-preview-actions {
   display: flex;
   align-items: center;
@@ -1089,6 +1150,18 @@ h1 {
   margin-top: 8px;
   color: var(--muted);
   font-size: 11px;
+}
+
+.node-preview-hint {
+  white-space: nowrap;
+}
+
+.node-preview-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .node-preview-actions button {
@@ -1104,6 +1177,22 @@ h1 {
 .node-preview-actions button:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.node-preview-actions button.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.node-preview-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.node-preview-error {
+  margin: 8px 0 0;
+  color: var(--axiom);
+  font-size: 11px;
 }
 
 /* Hidden declarations are only drawn at all when hiding is switched off, and

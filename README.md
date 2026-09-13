@@ -115,6 +115,30 @@ is running on `127.0.0.1:8123`, `npm run dev` proxies `/api/marks` to it and the
 marks become editable from the browser.  With nothing listening — and in any
 deployed instance — the exported marks are shown read-only.
 
+## Reading a graph
+
+The graph beside a declaration opens full screen, and that is where a closure of
+any size is actually read.  Hovering a node gives a card with the docstring and
+the signature; `definition` adds the body, and stays on for the next node, so a
+chain of definitions can be read without leaving the drawing.
+
+A trusted declaration is drawn on a green field, and the card says **by whom** —
+a mark from `trust-marks.json`, a certificate of your own, or one from somebody
+whose key you follow, with a name this node authenticated shown differently from
+one a stranger's node merely typed.  The same card records a judgement: `mark
+trusted` writes to the marks file where that is editable, and `trust this`
+publishes an unsigned certificate under your account.  A note or a signature
+belongs with the declaration itself, which is a double-click on the node to
+focus it and `Esc` to leave the graph standing on it; that is the only
+difference between the two paths.
+
+Navigation goes through the browser's history, so the **back button** in the
+page and the one in the browser are the same button: opening a declaration or
+the full-screen graph is a step, going back undoes it, and a reload does not
+lose where you have been.  The depth, the direction and the filters are
+settings rather than places — they travel in the link, so a shared one arrives
+as it was read, but going back does not move them.
+
 ## Tests
 
 ```bash

@@ -1,6 +1,14 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as openpgp from 'openpgp'
-import { canonicalClaim, issuerOf, verifyHere, type Certificate, type Claim } from './certificates'
+import {
+  canonicalClaim,
+  issuerOf,
+  trustedVouches,
+  verifyHere,
+  voucherOf,
+  type Certificate,
+  type Claim,
+} from './certificates'
 
 /**
  * A claim canonicalised by `Trust/Cert.lean`, copied verbatim.
@@ -207,5 +215,81 @@ describe('issuerOf', () => {
 
   it('never says "unknown"', () => {
     expect(issuerOf(base).text).toBe('anonymous')
+  })
+})
+
+describe('voucherOf', () => {
+  const base = { hash: '629db3ae6e206484', issuer: '', fingerprint: '', local: true, mine: false, asserted: '' }
+
+  // The reason this exists: a reader who vouched for something and then could
+  // not see who had vouched for it.
+  it('says it was you, when it was', () => {
+    expect(voucherOf({ ...base, issuer: 'chrisflav', mine: true })).toMatchObject({
+      text: 'you',
+      verified: true,
+    })
+  })
+
+  it('names an account this node authenticated', () => {
+    expect(voucherOf({ ...base, issuer: 'chrisflav' })).toMatchObject({
+      text: 'chrisflav',
+      verified: true,
+    })
+  })
+
+  // §4.4: a name on a relayed row is the sending node's word.  It is still
+  // shown — dropping it loses something a reader wants — but not as a fact.
+  it('marks a relayed name unverified', () => {
+    const relayed = voucherOf({ ...base, issuer: 'stranger', local: false })
+    expect(relayed.text).toBe('stranger')
+    expect(relayed.verified).toBe(false)
+  })
+
+  it('falls back to the key you follow, and never to "unknown"', () => {
+    expect(
+      voucherOf({ ...base, local: false, fingerprint: 'aaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbcccccccc' }),
+    ).toMatchObject({ text: 'bbbbbbbbcccccccc', verified: true })
+    expect(voucherOf({ ...base, local: false }).text).toBe('anonymous')
+  })
+})
+
+describe('trustedVouches', () => {
+  /** A node that answers, since with none configured `call` asks nothing. */
+  const answer = (hashes: unknown[], status = 200) => {
+    vi.stubGlobal('localStorage', { getItem: () => 'https://node.example' })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ hashes }), { status })),
+    )
+  }
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('groups the rows by hash, so a node can name everyone who vouched for it', async () => {
+    answer([
+      { hash: 'a1', issuer: 'chrisflav', fingerprint: 'ff', local: true, mine: true, asserted: 'now' },
+      { hash: 'a1', issuer: 'someone', fingerprint: 'ee', local: false, mine: false, asserted: 'now' },
+      { hash: 'b2', issuer: 'someone', fingerprint: 'ee', local: false, mine: false, asserted: 'now' },
+    ])
+    const trusted = await trustedVouches('semantic-v1')
+    expect([...trusted.keys()]).toEqual(['a1', 'b2'])
+    expect(trusted.get('a1')).toHaveLength(2)
+    expect(trusted.get('a1')?.[0]?.mine).toBe(true)
+  })
+
+  // A node older than the fields, and a row that is not a row: neither may take
+  // the index down, and neither may quietly turn into a checked name.
+  it('survives an answer that does not carry everything', async () => {
+    answer([{ hash: 'a1' }, { issuer: 'nobody' }, null, 'nonsense'])
+    const trusted = await trustedVouches('semantic-v1')
+    expect([...trusted.keys()]).toEqual(['a1'])
+    expect(trusted.get('a1')?.[0]).toMatchObject({ issuer: '', local: false, mine: false })
+  })
+
+  // A node that is down leaves the index perfectly readable; it only means
+  // nothing is known to be trusted, which is what an empty map says.
+  it('is empty when the node cannot answer', async () => {
+    answer([{ hash: 'a1' }], 500)
+    expect((await trustedVouches('semantic-v1')).size).toBe(0)
   })
 })

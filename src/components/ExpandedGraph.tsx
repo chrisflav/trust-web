@@ -3,6 +3,7 @@ import type { Accept, GraphSource } from '../data/source'
 import type { NodeId } from '../data/types'
 import type { HiddenConfig } from '../data/hidden'
 import { EXPANDED_OPTIONS, GraphView, type GraphOptions } from './GraphView'
+import type { PreviewTrust } from './NodePreview'
 import { GraphLegend } from './GraphLegend'
 import type { ClosureSize } from '../data/source'
 import type { Direction } from './DepsTree'
@@ -24,6 +25,14 @@ interface ExpandedGraphProps {
   isHidden?: (id: NodeId) => boolean
   onHide: (name: string) => void
   onUnhide: (name: string) => void
+  /**
+   * Who trusts a declaration, and how to join them, for the hover card.
+   *
+   * This is the view where a closure is actually read, and until it carried
+   * this there was no way to see from it who had vouched for anything, nor to
+   * vouch for something without leaving the graph to do it.
+   */
+  preview?: PreviewTrust
   /** Repositories present in the index, and which of them to draw. */
   repos: string[]
   repoFilter: Set<string>
@@ -107,6 +116,7 @@ export function ExpandedGraph({
   isHidden,
   onHide,
   onUnhide,
+  preview,
   repos,
   repoFilter,
   onRepoFilter,
@@ -419,6 +429,7 @@ export function ExpandedGraph({
             isHidden={isHidden}
             onHide={onHide}
             onUnhide={onUnhide}
+            preview={preview}
             options={options}
             onStats={onStats}
             fit={false}

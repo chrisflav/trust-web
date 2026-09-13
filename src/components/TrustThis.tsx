@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import {
+  claimFor,
   publish,
   registerPublicKey,
   revoke,
@@ -34,16 +35,7 @@ export function TrustThis({ decl, meta, mine, busy, onPublished }: TrustThisProp
   const [working, setWorking] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const claim = (): Claim => ({
-    decl: decl.name,
-    hash: decl.hash ?? '',
-    hasher: meta.hasher ?? 'semantic-v1',
-    repo: meta.repo,
-    commit: meta.rev,
-    toolchain: meta.toolchain,
-    asserted: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
-    note,
-  })
+  const claim = (): Claim => claimFor(decl, meta, note)
 
   const finish = (message: string | null) => {
     // Whatever happened, the key does not stay in this page a moment longer.
