@@ -128,8 +128,9 @@ whose key you follow, with a name this node authenticated shown differently from
 one a stranger's node merely typed.  The same card records a judgement: `mark
 trusted` writes to the marks file where that is editable, and `trust this`
 publishes an unsigned certificate under your account.  A note or a signature
-belongs with the declaration itself — double-click to open it — and that is the
-only difference between the two paths.
+belongs with the declaration itself, which is a double-click on the node to
+focus it and `Esc` to leave the graph standing on it; that is the only
+difference between the two paths.
 
 Navigation goes through the browser's history, so the **back button** in the
 page and the one in the browser are the same button: opening a declaration or

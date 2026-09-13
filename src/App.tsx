@@ -170,6 +170,16 @@ export function App() {
   // twice over; the guard makes the load happen once per page instead.
   const loadStarted = useRef(false)
 
+  /**
+   * Whether a history traversal we asked for is still on its way.
+   *
+   * `history.back()` is queued, not immediate: until `popstate` lands the
+   * expanded graph is still mounted and still listening for Escape, so a second
+   * press went back a second time and left the reader two steps away — out of
+   * the graph *and* off the declaration they opened it from.
+   */
+  const leaving = useRef(false)
+
   useEffect(() => {
     if (loadStarted.current || !LOCATION) return
     loadStarted.current = true
@@ -284,6 +294,8 @@ export function App() {
     const onPop = (event: PopStateEvent) => {
       const state = readNav(event.state)
       if (!state) return
+      // The traversal we may have asked for has arrived, whatever it was.
+      leaving.current = false
       // Resolved before anything moves: an entry naming a declaration this
       // index does not have is not half-applied, or the view and the history
       // would disagree about where the reader is.
@@ -686,8 +698,15 @@ export function App() {
    * no step to undo, closes it in place instead.
    */
   const closeExpanded = () => {
-    if (closeIsBack(nav)) window.history.back()
-    else setExpanded(false)
+    if (!closeIsBack(nav)) {
+      setExpanded(false)
+      return
+    }
+    // Once only: see `leaving`.  Escape is held in the graph's own listener,
+    // which is still attached until the traversal actually lands.
+    if (leaving.current) return
+    leaving.current = true
+    window.history.back()
   }
 
   if (expanded && rootDecl && root !== null) {
@@ -743,7 +762,14 @@ export function App() {
           title={
             !nav || nav.seq === 0
               ? 'Nothing to go back to'
-              : `Back to ${nav.prev ?? 'the previous declaration'}`
+              : // The entry behind can be this same declaration, which is only
+                // possible when it is the full-screen graph of it — naming the
+                // declaration there would offer to go where the reader already
+                // is.  Arriving on `?graph=expanded` and closing it is the way
+                // to get there.
+                nav.prev === nav.decl
+                ? 'Back to the full-screen graph'
+                : `Back to ${nav.prev ?? 'the previous declaration'}`
           }
         >
           ← back

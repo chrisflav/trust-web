@@ -77,6 +77,12 @@ interface Voucher {
  * A mark and a certificate of your own are two judgements and one person, so
  * they are shown as one name with both reasons behind it; a list that said
  * "you · you" would be reporting on our storage rather than on who vouched.
+ *
+ * Folding takes the *better* of the two standings, not the worse.  A name is
+ * shown as checked when something here checked it, and a row relayed by a peer
+ * naming the same account does not unsay that — with the worse of the two, any
+ * followed key could mute a name this node had authenticated by echoing it.
+ * The reasons are kept in full behind the name, both of them.
  */
 function vouchersFor(trusted: TrustedBy | undefined): Voucher[] {
   if (!trusted) return []
@@ -96,7 +102,7 @@ function vouchersFor(trusted: TrustedBy | undefined): Voucher[] {
     const already = found.find((entry) => entry.text === who.text)
     if (already) {
       if (!already.why.includes(who.why)) already.why = `${already.why}\n${who.why}`
-      already.verified = already.verified && who.verified
+      already.verified = already.verified || who.verified
       continue
     }
     found.push({ ...who })
@@ -137,6 +143,9 @@ export function NodePreview({
     let current = true
     setCode(null)
     setError(null)
+    // One card is reused as the pointer moves, so a write still in flight on
+    // the node behind us must not leave every node ahead of us unclickable.
+    setBusy(false)
     source.code(id).then((loaded) => {
       if (current) setCode(loaded)
     })
@@ -278,7 +287,7 @@ export function NodePreview({
               title={
                 mine
                   ? 'Withdraw your certificate for this content'
-                  : 'Publish an unsigned certificate for this content, with no note. Open the declaration to add either.'
+                  : 'Publish an unsigned certificate for this content, with no note. Focus the declaration and leave the graph to add either.'
               }
               onClick={(event) => {
                 event.stopPropagation()
