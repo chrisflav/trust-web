@@ -7,6 +7,8 @@ import {
   trustedVouches,
   verifyHere,
   voucherOf,
+  whoAmI,
+  whoTrusts,
   type Certificate,
   type Claim,
 } from './certificates'
@@ -335,5 +337,89 @@ describe('issuersOf', () => {
 
   it('is empty when nobody has', () => {
     expect(issuersOf([])).toEqual([])
+  })
+})
+
+describe('whoTrusts and whoAmI', () => {
+  const node = (body: unknown, status = 200) => {
+    vi.stubGlobal('localStorage', { getItem: () => 'https://node.example' })
+    // The url is a declared parameter because the depth test reads it back.
+    const fetched = vi.fn(async (url: unknown) => {
+      void url
+      return new Response(JSON.stringify(body), { status })
+    })
+    vi.stubGlobal('fetch', fetched)
+    return fetched
+  }
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  // The distinction the whole card rests on: "nobody vouched" and "nobody was
+  // asked" are different sentences, and only one of them is about the world.
+  it('says whether the node answered at all', async () => {
+    node({ certificates: [], truncated: false, askedPeers: 0 })
+    expect(await whoTrusts('a1', 'semantic-v1')).toMatchObject({ reached: true, certificates: [] })
+    node('nope', 500)
+    expect(await whoTrusts('a1', 'semantic-v1')).toMatchObject({ reached: false, certificates: [] })
+  })
+
+  it('asks the node to reach its peers only when asked to', async () => {
+    const local = node({ certificates: [] })
+    await whoTrusts('a1', 'semantic-v1')
+    expect(String(local.mock.calls[0]?.[0])).not.toContain('depth=')
+    const deep = node({ certificates: [] })
+    await whoTrusts('a1', 'semantic-v1', 1)
+    expect(String(deep.mock.calls[0]?.[0])).toContain('depth=1')
+  })
+
+  it('tells a signed-out reader from a node that is not there', async () => {
+    node({ user: null })
+    expect(await whoAmI()).toEqual({ reached: true, identity: null })
+    node({ user: { login: 'chrisflav' } })
+    expect(await whoAmI()).toMatchObject({ reached: true, identity: { login: 'chrisflav' } })
+    node('nope', 502)
+    expect(await whoAmI()).toEqual({ reached: false, identity: null })
+  })
+})
+
+describe('issuersOf, keyed by what identifies a person', () => {
+  const base = {
+    claim: GOLDEN_CLAIM,
+    issuer: '',
+    avatarUrl: '',
+    signature: null,
+    fingerprint: null,
+    key: null,
+    assurance: 'attested' as const,
+    keyVerifiedVia: null,
+    canonical: GOLDEN_CANONICAL,
+    provenance: { local: true, origin: '', fromPeer: '', verifiedHere: false, fetchedAt: null },
+  }
+
+  // Two unnamed certificates are two people until something says otherwise;
+  // folding them on the word "anonymous" understated how many had vouched.
+  it('keeps unnamed certificates apart when their keys differ', () => {
+    const one = { ...base, provenance: { ...base.provenance, local: false } }
+    expect(
+      issuersOf([
+        { ...one, fingerprint: 'a'.repeat(40), assurance: 'signed' as const },
+        { ...one, fingerprint: 'b'.repeat(40), assurance: 'signed' as const },
+      ]),
+    ).toHaveLength(2)
+  })
+
+  // A stranger's node echoing an account name is the case where two entries
+  // under one name is exactly the thing worth seeing.
+  it('does not swallow a relayed entry that echoes a local name', () => {
+    const mine = { ...base, issuer: 'chrisflav', fingerprint: 'a'.repeat(40) }
+    const echo = {
+      ...base,
+      hints: { issuer: 'chrisflav' },
+      fingerprint: 'b'.repeat(40),
+      provenance: { ...base.provenance, local: false, origin: 'https://elsewhere.example' },
+    }
+    const found = issuersOf([mine, echo])
+    expect(found).toHaveLength(2)
+    expect(found.filter((who) => who.verified)).toHaveLength(1)
   })
 })

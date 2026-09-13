@@ -29,12 +29,12 @@ import {
 } from './data/indexLocation'
 import {
   claimFor,
-  currentIdentity,
   hasServer,
   publish,
   revoke,
   trustList,
   trustedVouches,
+  whoAmI,
   type FollowedKey,
   type Identity,
   type Vouch,
@@ -157,6 +157,14 @@ export function App() {
   )
   /** Who you are on the certificate server, and whose certificates you count. */
   const [identity, setIdentity] = useState<Identity | null>(null)
+  /**
+   * What is known about that: signed in, signed out, or not established.
+   *
+   * `unknown` is the honest answer both before `/api/me` has replied and when
+   * there is no node behind this origin to reply at all, and the two look the
+   * same from here.  Neither is a reason to tell a reader to sign in.
+   */
+  const [session, setSession] = useState<'in' | 'out' | 'unknown'>('unknown')
   const [following, setFollowing] = useState<Set<string>>(new Set())
   /** Keys you follow — the half of a trust list that survives federation. */
   const [followingKeys, setFollowingKeys] = useState<FollowedKey[]>([])
@@ -216,9 +224,12 @@ export function App() {
    */
   const refreshFederation = useCallback(async () => {
     if (!hasServer()) return
-    const me = await currentIdentity()
-    setIdentity(me)
-    if (!me) {
+    const me = await whoAmI()
+    setIdentity(me.identity)
+    // A node that did not answer leaves this unknown rather than signed out:
+    // there is nothing to sign in to if there is nothing there.
+    setSession(!me.reached ? 'unknown' : me.identity ? 'in' : 'out')
+    if (!me.identity) {
       setFollowing(new Set())
       setFollowingKeys([])
       setFederated(new Map())
@@ -584,9 +595,9 @@ export function App() {
       trustedBy,
       onMark: marks.editable ? markTrusted : undefined,
       onVouch: identity ? vouchFor : undefined,
-      signedIn: identity !== null,
+      session,
     }),
-    [trustedBy, marks.editable, markTrusted, identity, vouchFor],
+    [trustedBy, marks.editable, markTrusted, identity, vouchFor, session],
   )
 
   // Nothing has been picked: a first visit, or a session that has not chosen.

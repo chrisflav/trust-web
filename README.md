@@ -133,10 +133,14 @@ window has none of it, and a signed-in one is told nothing about people they do
 not follow.  So the card never reports that nobody vouched — it cannot know
 that — and `who vouches?` beside it asks the node the question it can answer,
 which is who has published a certificate for this content at all.  Anybody may
-ask that, signed in or not; it is one request about one declaration, which is
-why it is a button rather than something every hover does.  The same card records a judgement: `mark
-trusted` writes to the marks file where that is editable, and `trust this`
-publishes an unsigned certificate under your account.  A note or a signature
+ask that, signed in or not.  It is a button rather than something every hover
+does because it is a request per declaration, and because asking deliberately
+earns a `depth`, which lets the node ask its peers as well; the panel on the
+declaration itself runs on every declaration opened, so that one stays local.
+
+The same card records a judgement: `mark trusted` writes to the marks file
+where that is editable, and `trust this` publishes an unsigned certificate
+under your account.  A note or a signature
 belongs with the declaration itself, which is a double-click on the node to
 focus it and `Esc` to leave the graph standing on it; that is the only
 difference between the two paths.

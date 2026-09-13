@@ -44,7 +44,7 @@ export interface PreviewTrust {
   /** Publish or withdraw a certificate; absent when nobody is signed in. */
   onVouch?: (id: NodeId, vouch: boolean) => Promise<void>
   /**
-   * Whether anybody is signed in to the node.
+   * What is known about the reader's session, which is three things and not two.
    *
    * What `trustedBy` answers is *yours*, and a reader who is not signed in has
    * no trusted set at all — `GET /api/trusted` is 401, because there is no
@@ -52,8 +52,13 @@ export interface PreviewTrust {
    * would be a claim about the world made from a position of not knowing, and
    * it was wrong in the one place it mattered most: a reader in a private
    * window, looking for the certificates they had published themselves.
+   *
+   * `unknown` covers both the moment before `/api/me` has answered and a page
+   * with no node behind its origin at all.  Neither is an invitation to sign
+   * in, so neither gets one; the card says nothing rather than something it
+   * cannot support.
    */
-  signedIn: boolean
+  session: 'in' | 'out' | 'unknown'
 }
 
 interface NodePreviewProps {
@@ -105,9 +110,9 @@ interface Voucher {
  */
 function vouchersFor(trusted: TrustedBy | undefined): Voucher[] {
   if (!trusted) return []
-  const found: Voucher[] = []
+  const found = new Map<string, Voucher>()
   if (trusted.mark) {
-    found.push({
+    found.set('you', {
       text: 'you',
       verified: true,
       why:
@@ -118,15 +123,22 @@ function vouchersFor(trusted: TrustedBy | undefined): Voucher[] {
   }
   for (const vouch of trusted.vouches) {
     const who = voucherOf(vouch)
-    const already = found.find((entry) => entry.text === who.text)
-    if (already) {
-      if (!already.why.includes(who.why)) already.why = `${already.why}\n${who.why}`
-      already.verified = already.verified || who.verified
+    // Yours is yours however it was signed; everyone else is their key, and
+    // only their name when they have no key here to be told apart by.
+    const key = vouch.mine
+      ? 'you'
+      : vouch.fingerprint
+        ? `key:${vouch.fingerprint.toLowerCase()}`
+        : who.text
+    const already = found.get(key)
+    if (!already) {
+      found.set(key, { ...who })
       continue
     }
-    found.push({ ...who })
+    if (!already.why.includes(who.why)) already.why = `${already.why}\n${who.why}`
+    already.verified = already.verified || who.verified
   }
-  return found
+  return [...found.values()]
 }
 
 /**
@@ -164,7 +176,7 @@ export function NodePreview({
    * the card shows unasked is the set the page already holds, which is only
    * ever *your* trust; this is the other question, and anyone can ask it.
    */
-  const [asked, setAsked] = useState<Answer | null>(null)
+  const [asked, setAsked] = useState<{ id: NodeId; answer: Answer } | null>(null)
   const decl = source.node(id)
 
   useEffect(() => {
@@ -208,8 +220,13 @@ export function NodePreview({
   const mine = (trusted?.vouches ?? []).some((vouch) => vouch.mine)
   const hash = source.hashOf(id)
 
+  // The answer is carried with the declaration it is about.  This card is one
+  // instance the pointer drags from node to node, so a reply that arrives after
+  // the pointer has moved would otherwise be shown under a declaration it says
+  // nothing about — with nothing on screen to suggest it.
+  const answer = asked?.id === id ? asked.answer : null
   /** Everyone the node knows of who vouched for this content, deduplicated. */
-  const publicVouchers: Issuer[] = asked ? issuersOf(asked.certificates) : []
+  const publicVouchers: Issuer[] = answer ? issuersOf(answer.certificates) : []
 
   /** Run one judgement, keeping the card up and saying so if it fails. */
   const act = async (change: () => Promise<void>) => {
@@ -280,15 +297,17 @@ export function NodePreview({
             // do not follow.  Both say what they are, and the button beside
             // them asks the question this cannot answer.
             <span className="node-preview-trust-label none">
-              {trust.signedIn
+              {trust.session === 'in'
                 ? 'nobody you trust vouches for this'
-                : 'sign in for certificates to count as trust'}
+                : trust.session === 'out'
+                  ? 'sign in for certificates to count as trust'
+                  : ''}
             </span>
           )}
         </div>
       )}
 
-      {asked && (
+      {answer && (
         <div className="node-preview-trust">
           {/* Everyone the node knows of, which is not the same list as the one
               above: that one counts, this one merely exists. */}
@@ -304,11 +323,15 @@ export function NodePreview({
               </span>
             ))
           ) : (
+            // The distinction this card exists to keep: a node that did not
+            // answer has not told us that nobody vouched.
             <span className="node-preview-trust-label none">
-              nobody has published a certificate for this content
+              {answer.reached
+                ? 'nobody has published a certificate for this content'
+                : 'the node did not answer'}
             </span>
           )}
-          {asked.truncated && (
+          {answer.truncated && (
             <span
               className="node-preview-trust-label none"
               title="A peer did not answer in time, so this list may be short. It is not a statement that nobody else vouches for this."
@@ -322,16 +345,22 @@ export function NodePreview({
       <div className="node-preview-actions">
         <span className="node-preview-hint">double-click to focus</span>
         <div className="node-preview-buttons">
-          {/* Anybody may ask this, signed in or not: certificates are public,
-              and the query is one request about one declaration. */}
-          {trust && asked === null && hash.length > 0 && hasServer() && (
+          {/* Anybody may ask this, signed in or not: certificates are public.
+              It is a button and not something every hover does because it is a
+              request per declaration, and asked deliberately it is worth
+              letting the node ask its peers too — which is `depth`, and which
+              the panel on the declaration does not do, because that one runs
+              itself on every declaration opened. */}
+          {trust && answer === null && hash.length > 0 && hasServer() && (
             <button
               disabled={busy}
-              title="Ask the node who has published a certificate for this content — everybody, not only the people you count"
+              title="Ask the node who has published a certificate for this content — everybody, not only the people whose certificates count for you"
               onClick={(event) => {
                 event.stopPropagation()
+                const forId = id
                 void act(async () => {
-                  setAsked(await whoTrusts(hash, source.meta().hasher ?? 'semantic-v1'))
+                  const found = await whoTrusts(hash, source.meta().hasher ?? 'semantic-v1', 1)
+                  setAsked({ id: forId, answer: found })
                 })
               }}
             >
@@ -380,7 +409,17 @@ export function NodePreview({
               }
               onClick={(event) => {
                 event.stopPropagation()
-                void act(() => trust.onVouch!(id, !mine))
+                const forId = id
+                void act(async () => {
+                  await trust.onVouch!(id, !mine)
+                  // Whatever the list below said, it said it before this.
+                  // Leaving it would put two contradictory sentences about one
+                  // declaration on screen at the same time.
+                  if (answer) {
+                    const again = await whoTrusts(hash, source.meta().hasher ?? 'semantic-v1', 1)
+                    setAsked({ id: forId, answer: again })
+                  }
+                })
               }}
             >
               {mine ? 'withdraw' : 'trust this'}
