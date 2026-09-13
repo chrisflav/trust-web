@@ -125,9 +125,26 @@ chain of definitions can be read without leaving the drawing.
 A trusted declaration is drawn on a green field, and the card says **by whom** —
 a mark from `trust-marks.json`, a certificate of your own, or one from somebody
 whose key you follow, with a name this node authenticated shown differently from
-one a stranger's node merely typed.  The same card records a judgement: `mark
-trusted` writes to the marks file where that is editable, and `trust this`
-publishes an unsigned certificate under your account.  A note or a signature
+one a stranger's node merely typed.
+
+That list is what counts *for you*, and it says so.  It comes from your trust
+list, which is a question about a signed-in account: a reader in a private
+window has none of it, and a signed-in one is told nothing about people they do
+not follow.  So the card never reports that nobody vouched — it cannot know
+that — and underneath it says **who else vouched**, which is a question about
+the content and not about the reader, so it has an answer for everybody.
+Certificates are public: the same names appear in a private window as in the
+one that published them.
+
+That second list is fetched, not asked for.  A pointer merely crossing a node
+asks nothing — the request waits a moment to see whether the reader stays — and
+an answer is remembered for the session, so re-reading a graph costs nothing.
+It is what this node holds, including what its peers have already sent it,
+which is the same question `Who trusts this` asks on the declaration itself.
+
+The same card records a judgement: `mark trusted` writes to the marks file
+where that is editable, and `trust this` publishes an unsigned certificate
+under your account.  A note or a signature
 belongs with the declaration itself, which is a double-click on the node to
 focus it and `Esc` to leave the graph standing on it; that is the only
 difference between the two paths.

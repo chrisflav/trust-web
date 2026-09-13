@@ -99,6 +99,40 @@ export function issuerOf(certificate: Certificate): Issuer {
   }
 }
 
+/**
+ * One name per person who vouched, out of a list of certificates.
+ *
+ * Somebody who vouched for the same content twice — another repository, another
+ * commit — is one person who vouched, and a card with room for a line has to
+ * say that rather than printing their name twice.  Order is the answer's own,
+ * which is signed first and then most recently asserted.
+ */
+export function issuersOf(certificates: Certificate[]): Issuer[] {
+  const found = new Map<string, Issuer>()
+  for (const certificate of certificates) {
+    const who = issuerOf(certificate)
+    // Keyed by the signing key where there is one, and only by the name when
+    // there is not.  Folding on the rendered name alone made five unnamed,
+    // unsigned certificates from five sources into one "anonymous", and
+    // swallowed a relayed entry that merely echoed the name of somebody who
+    // had vouched here — the one case where two entries under one name is the
+    // thing worth seeing.
+    const key = certificate.fingerprint ? `key:${certificate.fingerprint.toLowerCase()}` : who.text
+    const already = found.get(key)
+    if (!already) {
+      found.set(key, { ...who })
+      continue
+    }
+    // The better standing wins: a relayed copy of a name this node
+    // authenticated does not unsay what this node checked.
+    if (who.verified && !already.verified) {
+      already.verified = true
+      already.why = who.why
+    }
+  }
+  return [...found.values()]
+}
+
 export interface Answer {
   certificates: Certificate[]
   /**
@@ -109,6 +143,16 @@ export interface Answer {
    */
   truncated: boolean
   askedPeers: number
+  /**
+   * Whether the node answered at all.
+   *
+   * The same distinction one step further out: a node that is down, or an
+   * origin with nothing behind `/api`, produces an empty list exactly as a node
+   * with nothing to say does.  Rendering the two the same way is how a page
+   * ends up telling a reader that nobody vouched for something when all that
+   * happened is that nobody was asked.
+   */
+  reached: boolean
 }
 
 /** The part of a certificate that gets signed. */
@@ -259,15 +303,26 @@ async function call<T>(path: string, init?: RequestInit): Promise<T | null> {
 }
 
 /**
- * Who vouches for this content, here and anywhere the server can reach.
+ * Who vouches for this content, as this node has it.
  *
- * The server fans out to its peers; this asks one question and gets one answer,
- * with each certificate labelled by where it came from.
+ * One question, one answer, with each certificate labelled by where it came
+ * from — and no session anywhere in it: certificates are public, so this is
+ * the same answer for a reader in a private window as for the person who
+ * published them.
+ *
+ * This node, deliberately.  §7 has a node answer from its own store and from
+ * what peers have already sent it unless `?depth=` asks it to go further, and
+ * this question is asked for every declaration a reader opens or lingers on,
+ * which is not the place to spend a fan-out.  So a certificate held only by a
+ * peer this node has never heard from does not appear here, and `truncated` is
+ * accordingly always false.
  */
 export async function whoTrusts(hash: string, hasher: string): Promise<Answer> {
   const query = new URLSearchParams({ hash, hasher })
   const result = await call<Answer>(`/api/certificates?${query}`)
-  return result ?? { certificates: [], truncated: false, askedPeers: 0 }
+  // A node that did not answer is not a node that said "nobody".
+  if (result === null) return { certificates: [], truncated: false, askedPeers: 0, reached: false }
+  return { ...result, reached: true }
 }
 
 /**
@@ -317,11 +372,27 @@ export async function verifyHere(
   }
 }
 
-export async function currentIdentity(): Promise<Identity | null> {
+/**
+ * Who you are, and whether the node was there to be asked.
+ *
+ * Three answers, not two.  "Signed out" and "there is nothing behind `/api`"
+ * both arrive as a null user, and a page that cannot tell them apart offers a
+ * reader a sign-in that does not exist — or, worse, explains an empty list by
+ * telling them to sign in when the truth is that nothing was reachable.
+ */
+export async function whoAmI(): Promise<{ reached: boolean; identity: Identity | null }> {
   const result = await call<{ user: { login: string } | null; local?: boolean }>('/api/me')
-  return result?.user
-    ? { login: result.user.login, avatarUrl: '', local: result.local === true }
-    : null
+  if (result === null) return { reached: false, identity: null }
+  return {
+    reached: true,
+    identity: result.user
+      ? { login: result.user.login, avatarUrl: '', local: result.local === true }
+      : null,
+  }
+}
+
+export async function currentIdentity(): Promise<Identity | null> {
+  return (await whoAmI()).identity
 }
 
 /** A key you follow, with whatever name you gave it. */

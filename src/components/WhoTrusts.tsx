@@ -58,7 +58,9 @@ export function WhoTrusts({
 
   useEffect(() => {
     if (!hasServer() || !decl.hash) {
-      setAnswer({ certificates: [], truncated: false, askedPeers: 0 })
+      // Nothing was asked, and with no node to ask there is nothing to report:
+      // `hasServer()` being false hides this whole section anyway.
+      setAnswer({ certificates: [], truncated: false, askedPeers: 0, reached: true })
       return
     }
     let current = true
@@ -141,7 +143,13 @@ export function WhoTrusts({
 
       {certificates === null && <p className="who-trusts-empty">Looking…</p>}
       {certificates?.length === 0 && (
-        <p className="who-trusts-empty">Nobody has published a certificate for this content yet.</p>
+        // The same distinction the graph's card keeps: a node that could not be
+        // asked has not said that nobody vouched.
+        <p className="who-trusts-empty">
+          {answer?.reached === false
+            ? 'The node did not answer, so this is not a statement that nobody vouches for it.'
+            : 'Nobody has published a certificate for this content yet.'}
+        </p>
       )}
 
       {certificates?.map((certificate) => {
