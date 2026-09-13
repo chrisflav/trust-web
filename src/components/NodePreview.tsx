@@ -290,7 +290,9 @@ export function NodePreview({
 
       {asked && (
         <div className="node-preview-trust">
-          <span className="node-preview-trust-label">on this node</span>
+          {/* Everyone the node knows of, which is not the same list as the one
+              above: that one counts, this one merely exists. */}
+          <span className="node-preview-trust-label">vouched for by</span>
           {publicVouchers.length > 0 ? (
             publicVouchers.map((voucher) => (
               <span
