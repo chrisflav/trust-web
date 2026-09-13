@@ -99,6 +99,33 @@ export function issuerOf(certificate: Certificate): Issuer {
   }
 }
 
+/**
+ * One name per person who vouched, out of a list of certificates.
+ *
+ * Somebody who vouched for the same content twice — another repository, another
+ * commit — is one person who vouched, and a card with room for a line has to
+ * say that rather than printing their name twice.  Order is the answer's own,
+ * which is signed first and then most recently asserted.
+ */
+export function issuersOf(certificates: Certificate[]): Issuer[] {
+  const found: Issuer[] = []
+  for (const certificate of certificates) {
+    const who = issuerOf(certificate)
+    const already = found.find((entry) => entry.text === who.text)
+    // The better standing wins, as in the card: a relayed copy of a name this
+    // node authenticated does not unsay what this node checked.
+    if (already) {
+      if (who.verified && !already.verified) {
+        already.verified = true
+        already.why = who.why
+      }
+      continue
+    }
+    found.push({ ...who })
+  }
+  return found
+}
+
 export interface Answer {
   certificates: Certificate[]
   /**

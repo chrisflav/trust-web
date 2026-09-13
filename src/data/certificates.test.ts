@@ -3,6 +3,7 @@ import * as openpgp from 'openpgp'
 import {
   canonicalClaim,
   issuerOf,
+  issuersOf,
   trustedVouches,
   verifyHere,
   voucherOf,
@@ -291,5 +292,48 @@ describe('trustedVouches', () => {
   it('is empty when the node cannot answer', async () => {
     answer([{ hash: 'a1' }], 500)
     expect((await trustedVouches('semantic-v1')).size).toBe(0)
+  })
+})
+
+describe('issuersOf', () => {
+  const base = {
+    claim: GOLDEN_CLAIM,
+    issuer: '',
+    avatarUrl: '',
+    signature: null,
+    fingerprint: null,
+    key: null,
+    assurance: 'attested' as const,
+    keyVerifiedVia: null,
+    canonical: GOLDEN_CANONICAL,
+    provenance: { local: true, origin: '', fromPeer: '', verifiedHere: false, fetchedAt: null },
+  }
+
+  // Vouching for the same content at two commits is one person vouching, and a
+  // card with room for a line has to say that rather than printing them twice.
+  it('names each person once', () => {
+    expect(
+      issuersOf([
+        { ...base, issuer: 'chrisflav' },
+        { ...base, issuer: 'chrisflav', claim: { ...GOLDEN_CLAIM, commit: 'deadbee' } },
+        { ...base, issuer: 'someone' },
+      ]).map((who) => who.text),
+    ).toEqual(['chrisflav', 'someone'])
+  })
+
+  it('keeps the better standing when a relayed copy names the same person', () => {
+    const relayed = {
+      ...base,
+      hints: { issuer: 'chrisflav' },
+      provenance: { ...base.provenance, local: false, origin: 'https://elsewhere.example' },
+    }
+    expect(issuersOf([relayed, { ...base, issuer: 'chrisflav' }])[0]).toMatchObject({
+      text: 'chrisflav',
+      verified: true,
+    })
+  })
+
+  it('is empty when nobody has', () => {
+    expect(issuersOf([])).toEqual([])
   })
 })

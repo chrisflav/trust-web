@@ -125,7 +125,16 @@ chain of definitions can be read without leaving the drawing.
 A trusted declaration is drawn on a green field, and the card says **by whom** —
 a mark from `trust-marks.json`, a certificate of your own, or one from somebody
 whose key you follow, with a name this node authenticated shown differently from
-one a stranger's node merely typed.  The same card records a judgement: `mark
+one a stranger's node merely typed.
+
+That list is what counts *for you*, and it says so.  It comes from your trust
+list, which is a question about a signed-in account: a reader in a private
+window has none of it, and a signed-in one is told nothing about people they do
+not follow.  So the card never reports that nobody vouched — it cannot know
+that — and `who vouches?` beside it asks the node the question it can answer,
+which is who has published a certificate for this content at all.  Anybody may
+ask that, signed in or not; it is one request about one declaration, which is
+why it is a button rather than something every hover does.  The same card records a judgement: `mark
 trusted` writes to the marks file where that is editable, and `trust this`
 publishes an unsigned certificate under your account.  A note or a signature
 belongs with the declaration itself, which is a double-click on the node to

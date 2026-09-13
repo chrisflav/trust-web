@@ -584,6 +584,7 @@ export function App() {
       trustedBy,
       onMark: marks.editable ? markTrusted : undefined,
       onVouch: identity ? vouchFor : undefined,
+      signedIn: identity !== null,
     }),
     [trustedBy, marks.editable, markTrusted, identity, vouchFor],
   )

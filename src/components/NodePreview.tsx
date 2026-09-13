@@ -1,6 +1,14 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
-import { voucherOf, type Vouch } from '../data/certificates'
+import {
+  hasServer,
+  issuersOf,
+  voucherOf,
+  whoTrusts,
+  type Answer,
+  type Issuer,
+  type Vouch,
+} from '../data/certificates'
 import type { GraphSource } from '../data/source'
 import type { DeclCode, NodeId, TrustMark } from '../data/types'
 
@@ -35,6 +43,17 @@ export interface PreviewTrust {
   onMark?: (name: string, trusted: boolean) => Promise<void>
   /** Publish or withdraw a certificate; absent when nobody is signed in. */
   onVouch?: (id: NodeId, vouch: boolean) => Promise<void>
+  /**
+   * Whether anybody is signed in to the node.
+   *
+   * What `trustedBy` answers is *yours*, and a reader who is not signed in has
+   * no trusted set at all — `GET /api/trusted` is 401, because there is no
+   * "you" for it to be about.  Saying "nobody vouches for this" from there
+   * would be a claim about the world made from a position of not knowing, and
+   * it was wrong in the one place it mattered most: a reader in a private
+   * window, looking for the certificates they had published themselves.
+   */
+  signedIn: boolean
 }
 
 interface NodePreviewProps {
@@ -137,6 +156,15 @@ export function NodePreview({
   const [code, setCode] = useState<DeclCode | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /**
+   * The public answer to "who vouches for this content", once asked for.
+   *
+   * Asked for, rather than fetched with the card: it is one federated query per
+   * declaration, and a pointer crossing a wide layer would fire dozens.  What
+   * the card shows unasked is the set the page already holds, which is only
+   * ever *your* trust; this is the other question, and anyone can ask it.
+   */
+  const [asked, setAsked] = useState<Answer | null>(null)
   const decl = source.node(id)
 
   useEffect(() => {
@@ -144,8 +172,10 @@ export function NodePreview({
     setCode(null)
     setError(null)
     // One card is reused as the pointer moves, so a write still in flight on
-    // the node behind us must not leave every node ahead of us unclickable.
+    // the node behind us must not leave every node ahead of us unclickable,
+    // and an answer about the node behind us must not be shown under this one.
     setBusy(false)
+    setAsked(null)
     source.code(id).then((loaded) => {
       if (current) setCode(loaded)
     })
@@ -177,6 +207,9 @@ export function NodePreview({
   const marked = trusted?.mark !== undefined
   const mine = (trusted?.vouches ?? []).some((vouch) => vouch.mine)
   const hash = source.hashOf(id)
+
+  /** Everyone the node knows of who vouched for this content, deduplicated. */
+  const publicVouchers: Issuer[] = asked ? issuersOf(asked.certificates) : []
 
   /** Run one judgement, keeping the card up and saying so if it fails. */
   const act = async (change: () => Promise<void>) => {
@@ -241,7 +274,45 @@ export function NodePreview({
               ))}
             </>
           ) : (
-            <span className="node-preview-trust-label none">nobody vouches for this yet</span>
+            // Never "nobody vouches for this".  What is held here is the set
+            // that counts *for you*, so with nobody signed in it is empty for
+            // want of a you, and even signed in it is silent about anybody you
+            // do not follow.  Both say what they are, and the button beside
+            // them asks the question this cannot answer.
+            <span className="node-preview-trust-label none">
+              {trust.signedIn
+                ? 'nobody you trust vouches for this'
+                : 'sign in for certificates to count as trust'}
+            </span>
+          )}
+        </div>
+      )}
+
+      {asked && (
+        <div className="node-preview-trust">
+          <span className="node-preview-trust-label">on this node</span>
+          {publicVouchers.length > 0 ? (
+            publicVouchers.map((voucher) => (
+              <span
+                key={voucher.text}
+                className={`node-preview-voucher${voucher.verified ? '' : ' unverified'}`}
+                title={voucher.why}
+              >
+                {voucher.text}
+              </span>
+            ))
+          ) : (
+            <span className="node-preview-trust-label none">
+              nobody has published a certificate for this content
+            </span>
+          )}
+          {asked.truncated && (
+            <span
+              className="node-preview-trust-label none"
+              title="A peer did not answer in time, so this list may be short. It is not a statement that nobody else vouches for this."
+            >
+              · and a peer did not answer
+            </span>
           )}
         </div>
       )}
@@ -249,6 +320,22 @@ export function NodePreview({
       <div className="node-preview-actions">
         <span className="node-preview-hint">double-click to focus</span>
         <div className="node-preview-buttons">
+          {/* Anybody may ask this, signed in or not: certificates are public,
+              and the query is one request about one declaration. */}
+          {trust && asked === null && hash.length > 0 && hasServer() && (
+            <button
+              disabled={busy}
+              title="Ask the node who has published a certificate for this content — everybody, not only the people you count"
+              onClick={(event) => {
+                event.stopPropagation()
+                void act(async () => {
+                  setAsked(await whoTrusts(hash, source.meta().hasher ?? 'semantic-v1'))
+                })
+              }}
+            >
+              who vouches?
+            </button>
+          )}
           {code?.value && (
             <button
               className={showValue ? 'on' : ''}
